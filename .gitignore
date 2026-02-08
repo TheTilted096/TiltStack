@@ -1,1 +1,6 @@
 __pycache__/
+
+# PyBind11 build artifacts
+build/
+*.pyd
+*.so

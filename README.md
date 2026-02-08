@@ -40,11 +40,21 @@ Will contain performance-critical C++ code exposed to Python via PyBind11. This 
 
 Reference implementation of CFR for Kuhn Poker, a simplified 3-card poker game. Useful for understanding the core CFR algorithm before tackling more complex variants.
 
+## Getting Started
+
+```bash
+make install  # Install dependencies (pybind11)
+make          # Build C++ extensions
+make test     # Run tests
+```
+
+See [QUICK_START.md](QUICK_START.md) for more details. The Makefile works on both Linux and Windows.
+
 ## Current Status
 
 - Leduc Hold'em CFR solver implemented and verified
 - Kuhn Poker demo available for reference
-- C++ backend planned for performance optimization
+- C++ backend with PyBind11 integration for performance optimization
 
 ## Authors
 
