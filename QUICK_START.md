@@ -1,4 +1,4 @@
-# PyBind11 Quick Start
+# Quick Start
 
 ## Initial Setup
 
@@ -7,21 +7,24 @@ Install required dependencies:
 make install
 ```
 
+This installs `pybind11` via pip. You also need a C++ compiler:
+- **Windows**: MSVC (install via Visual Studio Build Tools)
+- **Linux/Mac**: g++ or clang++ (usually pre-installed)
+
 ## Build and Run
 
 The Makefile works on both Linux and Windows:
 
 ```bash
-make          # Build module, copy to src/pysrc/
-make test     # Build and run tests
+make          # Build the leducsolver module, copy to src/pysrc/
+make test     # Build and run the Leduc CFR solver
 make clean    # Remove build artifacts
-make help     # Show available commands
 ```
 
 After building, run Python scripts directly:
 ```bash
 cd src/pysrc
-python test_example.py   # On Linux: python3
+python Leduc.py   # On Linux: python3
 ```
 
 ## Project Structure
@@ -33,33 +36,42 @@ TiltStack/
 ├── build/                # Build artifacts (auto-created)
 └── src/
     ├── cppsrc/           # C++ source
-    │   ├── example.cpp   # Implementation
-    │   └── bindings.cpp  # PyBind11 wrappers
+    │   ├── Node.h        # Game tree types and declarations
+    │   ├── Node.cpp      # Node/NodeInfo implementation
+    │   ├── Leduc.h       # LeducSolver declaration
+    │   ├── Leduc.cpp     # CFR solver implementation
+    │   └── bindings.cpp  # PyBind11 wrappers (leducsolver module)
     └── pysrc/            # Python source
-        ├── *.pyd         # Compiled module (copied here)
-        └── test_example.py
+        ├── leducsolver.pyd  # Compiled module (copied here after build)
+        └── Leduc.py         # Training loop and output
 ```
 
 ## Workflow
 
-1. Edit C++ in `src/cppsrc/`
+1. Edit C++ solver code in `src/cppsrc/`
 2. Run `make`
-3. Run `python src/pysrc/your_script.py`
+3. Run `python src/pysrc/Leduc.py`
 
-## Adding C++ Functions
-
-**src/cppsrc/example.cpp:**
-```cpp
-int subtract(int a, int b) { return a - b; }
-```
+## Adding C++ Bindings
 
 **src/cppsrc/bindings.cpp:**
 ```cpp
-m.def("subtract", &subtract);
+#include <pybind11/pybind11.h>
+#include "Leduc.cpp"
+#include "Node.cpp"
+
+namespace py = pybind11;
+
+PYBIND11_MODULE(leducsolver, m) {
+    py::class_<LeducSolver>(m, "LeducSolver")
+        .def(py::init<>())
+        .def("cfr", &LeducSolver::cfr);
+}
 ```
 
-**Build and use:**
-```bash
-make
-python -c "from src.pysrc import example_module as em; print(em.subtract(10, 3))"
+**Python usage:**
+```python
+from leducsolver import LeducSolver, Rank
+solver = LeducSolver()
+solver.cfr([Rank.JACK, Rank.QUEEN, Rank.KING], 0, [1.0, 1.0])
 ```

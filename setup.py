@@ -5,14 +5,14 @@ import pybind11
 import sys
 
 setup(
-    name='example_module',
+    name='leducsolver',
     ext_modules=[
         Extension(
-            'example_module',
+            'leducsolver',
             sources=['src/cppsrc/bindings.cpp'],
             include_dirs=[pybind11.get_include(), 'src/cppsrc'],
             language='c++',
-            extra_compile_args=['/std:c++20'] if sys.platform == 'win32' else ['-std=c++20'],
+            extra_compile_args=['/std:c++20', '/O2'] if sys.platform == 'win32' else ['-std=c++20', '-O3'],
         )
     ],
 )

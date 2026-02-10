@@ -1,0 +1,536 @@
+Leduc Poker CFR Results
+============================================================
+
+Round 1 Nodes (0-23):
+----------------------------------------
+J:           -> c:0.91, r:0.09
+J:r          -> c:0.79, b:0.16, r:0.05
+J:rr         -> c:0.00, b:0.77, r:0.23
+J:rrr        -> c:0.00, b:1.00
+J:c          -> c:0.67, r:0.33
+J:cr         -> c:0.95, b:0.03, r:0.02
+J:crr        -> c:0.00, b:0.99, r:0.01
+J:crrr       -> c:0.00, b:1.00
+Q:           -> c:0.21, r:0.79
+Q:r          -> c:0.00, b:0.80, r:0.20
+Q:rr         -> c:0.00, b:1.00, r:0.00
+Q:rrr        -> c:0.00, b:1.00
+Q:c          -> c:0.14, r:0.86
+Q:cr         -> c:0.00, b:0.78, r:0.22
+Q:crr        -> c:0.00, b:0.99, r:0.01
+Q:crrr       -> c:0.00, b:1.00
+K:           -> c:0.25, r:0.75
+K:r          -> c:0.00, b:0.50, r:0.50
+K:rr         -> c:0.00, b:0.73, r:0.27
+K:rrr        -> c:0.00, b:1.00
+K:c          -> c:0.00, r:1.00
+K:cr         -> c:0.00, b:0.24, r:0.76
+K:crr        -> c:0.00, b:0.97, r:0.03
+K:crrr       -> c:0.00, b:1.00
+
+Round 2 Nodes (24-527):
+----------------------------------------
+J|J:rb/              -> c:0.07, r:0.93
+J|J:rrb/             -> c:0.01, r:0.99
+J|J:rrrb/            -> c:0.01, r:0.99
+J|J:cc/              -> c:1.00, r:0.00
+J|J:crb/             -> c:0.08, r:0.92
+J|J:crrb/            -> c:0.09, r:0.91
+J|J:crrrb/           -> c:0.00, r:1.00
+Q|J:rb/              -> c:0.99, r:0.01
+Q|J:rrb/             -> c:1.00, r:0.00
+Q|J:rrrb/            -> c:0.98, r:0.02
+Q|J:cc/              -> c:1.00, r:0.00
+Q|J:crb/             -> c:0.97, r:0.03
+Q|J:crrb/            -> c:1.00, r:0.00
+Q|J:crrrb/           -> c:1.00, r:0.00
+K|J:rb/              -> c:0.94, r:0.06
+K|J:rrb/             -> c:0.89, r:0.11
+K|J:rrrb/            -> c:0.89, r:0.11
+K|J:cc/              -> c:1.00, r:0.00
+K|J:crb/             -> c:1.00, r:0.00
+K|J:crrb/            -> c:0.91, r:0.09
+K|J:crrrb/           -> c:0.55, r:0.45
+J|J:rb/r             -> c:0.00, b:0.00, r:1.00
+J|J:rrb/r            -> c:0.00, b:0.00, r:1.00
+J|J:rrrb/r           -> c:0.00, b:0.00, r:1.00
+J|J:cc/r             -> c:0.00, b:0.00, r:1.00
+J|J:crb/r            -> c:0.00, b:0.00, r:1.00
+J|J:crrb/r           -> c:0.00, b:0.00, r:1.00
+J|J:crrrb/r          -> c:0.00, b:0.00, r:1.00
+Q|J:rb/r             -> c:0.98, b:0.00, r:0.02
+Q|J:rrb/r            -> c:0.99, b:0.00, r:0.01
+Q|J:rrrb/r           -> c:0.99, b:0.00, r:0.01
+Q|J:cc/r             -> c:1.00, b:0.00, r:0.00
+Q|J:crb/r            -> c:1.00, b:0.00, r:0.00
+Q|J:crrb/r           -> c:0.98, b:0.00, r:0.02
+Q|J:crrrb/r          -> c:0.99, b:0.01, r:0.00
+K|J:rb/r             -> c:0.23, b:0.76, r:0.01
+K|J:rrb/r            -> c:0.12, b:0.87, r:0.01
+K|J:rrrb/r           -> c:0.03, b:0.97, r:0.00
+K|J:cc/r             -> c:0.86, b:0.09, r:0.05
+K|J:crb/r            -> c:0.27, b:0.73, r:0.00
+K|J:crrb/r           -> c:0.11, b:0.88, r:0.01
+K|J:crrrb/r          -> c:0.05, b:0.89, r:0.06
+J|J:rb/rr            -> c:0.00, b:0.00, r:1.00
+J|J:rrb/rr           -> c:0.00, b:0.00, r:1.00
+J|J:rrrb/rr          -> c:0.00, b:0.00, r:1.00
+J|J:cc/rr            -> c:0.00, b:0.29, r:0.71
+J|J:crb/rr           -> c:0.00, b:0.00, r:1.00
+J|J:crrb/rr          -> c:0.00, b:0.00, r:1.00
+J|J:crrrb/rr         -> c:0.00, b:0.00, r:1.00
+Q|J:rb/rr            -> c:1.00, b:0.00, r:0.00
+Q|J:rrb/rr           -> c:0.06, b:0.49, r:0.44
+Q|J:rrrb/rr          -> c:0.27, b:0.16, r:0.56
+Q|J:cc/rr            -> c:0.33, b:0.33, r:0.33
+Q|J:crb/rr           -> c:0.99, b:0.00, r:0.01
+Q|J:crrb/rr          -> c:0.82, b:0.00, r:0.18
+Q|J:crrrb/rr         -> c:0.00, b:0.00, r:1.00
+K|J:rb/rr            -> c:0.73, b:0.27, r:0.00
+K|J:rrb/rr           -> c:0.56, b:0.39, r:0.05
+K|J:rrrb/rr          -> c:0.19, b:0.80, r:0.00
+K|J:cc/rr            -> c:0.06, b:0.30, r:0.64
+K|J:crb/rr           -> c:0.79, b:0.09, r:0.13
+K|J:crrb/rr          -> c:0.46, b:0.54, r:0.00
+K|J:crrrb/rr         -> c:0.05, b:0.04, r:0.91
+J|J:rb/rrr           -> c:0.00, b:1.00
+J|J:rrb/rrr          -> c:0.00, b:1.00
+J|J:rrrb/rrr         -> c:0.00, b:1.00
+J|J:cc/rrr           -> c:0.00, b:1.00
+J|J:crb/rrr          -> c:0.00, b:1.00
+J|J:crrb/rrr         -> c:0.00, b:1.00
+J|J:crrrb/rrr        -> c:0.00, b:1.00
+Q|J:rb/rrr           -> c:1.00, b:0.00
+Q|J:rrb/rrr          -> c:0.99, b:0.01
+Q|J:rrrb/rrr         -> c:0.99, b:0.01
+Q|J:cc/rrr           -> c:0.14, b:0.86
+Q|J:crb/rrr          -> c:0.50, b:0.50
+Q|J:crrb/rrr         -> c:1.00, b:0.00
+Q|J:crrrb/rrr        -> c:0.50, b:0.50
+K|J:rb/rrr           -> c:1.00, b:0.00
+K|J:rrb/rrr          -> c:1.00, b:0.00
+K|J:rrrb/rrr         -> c:1.00, b:0.00
+K|J:cc/rrr           -> c:0.50, b:0.50
+K|J:crb/rrr          -> c:0.14, b:0.86
+K|J:crrb/rrr         -> c:0.94, b:0.06
+K|J:crrrb/rrr        -> c:0.47, b:0.53
+J|J:rb/c             -> c:0.00, r:1.00
+J|J:rrb/c            -> c:0.00, r:1.00
+J|J:rrrb/c           -> c:0.00, r:1.00
+J|J:cc/c             -> c:0.00, r:1.00
+J|J:crb/c            -> c:0.00, r:1.00
+J|J:crrb/c           -> c:0.00, r:1.00
+J|J:crrrb/c          -> c:0.00, r:1.00
+Q|J:rb/c             -> c:1.00, r:0.00
+Q|J:rrb/c            -> c:0.87, r:0.13
+Q|J:rrrb/c           -> c:1.00, r:0.00
+Q|J:cc/c             -> c:1.00, r:0.00
+Q|J:crb/c            -> c:0.52, r:0.48
+Q|J:crrb/c           -> c:1.00, r:0.00
+Q|J:crrrb/c          -> c:1.00, r:0.00
+K|J:rb/c             -> c:0.58, r:0.42
+K|J:rrb/c            -> c:0.99, r:0.01
+K|J:rrrb/c           -> c:0.84, r:0.16
+K|J:cc/c             -> c:0.78, r:0.22
+K|J:crb/c            -> c:0.92, r:0.08
+K|J:crrb/c           -> c:0.62, r:0.38
+K|J:crrrb/c          -> c:0.84, r:0.16
+J|J:rb/cr            -> c:0.00, b:0.00, r:1.00
+J|J:rrb/cr           -> c:0.00, b:0.00, r:1.00
+J|J:rrrb/cr          -> c:0.01, b:0.01, r:0.99
+J|J:cc/cr            -> c:0.00, b:0.00, r:1.00
+J|J:crb/cr           -> c:0.00, b:0.00, r:1.00
+J|J:crrb/cr          -> c:0.00, b:0.00, r:1.00
+J|J:crrrb/cr         -> c:0.00, b:0.00, r:1.00
+Q|J:rb/cr            -> c:1.00, b:0.00, r:0.00
+Q|J:rrb/cr           -> c:1.00, b:0.00, r:0.00
+Q|J:rrrb/cr          -> c:1.00, b:0.00, r:0.00
+Q|J:cc/cr            -> c:1.00, b:0.00, r:0.00
+Q|J:crb/cr           -> c:1.00, b:0.00, r:0.00
+Q|J:crrb/cr          -> c:1.00, b:0.00, r:0.00
+Q|J:crrrb/cr         -> c:1.00, b:0.00, r:0.00
+K|J:rb/cr            -> c:0.02, b:0.98, r:0.00
+K|J:rrb/cr           -> c:0.00, b:1.00, r:0.00
+K|J:rrrb/cr          -> c:0.00, b:1.00, r:0.00
+K|J:cc/cr            -> c:1.00, b:0.00, r:0.00
+K|J:crb/cr           -> c:0.00, b:1.00, r:0.00
+K|J:crrb/cr          -> c:0.01, b:0.99, r:0.00
+K|J:crrrb/cr         -> c:0.00, b:1.00, r:0.00
+J|J:rb/crr           -> c:0.00, b:0.00, r:1.00
+J|J:rrb/crr          -> c:0.00, b:0.00, r:1.00
+J|J:rrrb/crr         -> c:0.00, b:0.00, r:1.00
+J|J:cc/crr           -> c:0.00, b:0.29, r:0.71
+J|J:crb/crr          -> c:0.00, b:0.00, r:1.00
+J|J:crrb/crr         -> c:0.00, b:0.00, r:1.00
+J|J:crrrb/crr        -> c:0.00, b:0.39, r:0.61
+Q|J:rb/crr           -> c:0.77, b:0.01, r:0.23
+Q|J:rrb/crr          -> c:0.98, b:0.00, r:0.02
+Q|J:rrrb/crr         -> c:0.79, b:0.00, r:0.21
+Q|J:cc/crr           -> c:0.09, b:0.12, r:0.79
+Q|J:crb/crr          -> c:0.94, b:0.00, r:0.06
+Q|J:crrb/crr         -> c:0.67, b:0.17, r:0.17
+Q|J:crrrb/crr        -> c:0.29, b:0.06, r:0.65
+K|J:rb/crr           -> c:0.34, b:0.54, r:0.11
+K|J:rrb/crr          -> c:0.00, b:1.00, r:0.00
+K|J:rrrb/crr         -> c:0.21, b:0.31, r:0.48
+K|J:cc/crr           -> c:0.33, b:0.33, r:0.33
+K|J:crb/crr          -> c:0.00, b:1.00, r:0.00
+K|J:crrb/crr         -> c:0.31, b:0.58, r:0.10
+K|J:crrrb/crr        -> c:0.00, b:1.00, r:0.00
+J|J:rb/crrr          -> c:0.00, b:1.00
+J|J:rrb/crrr         -> c:0.00, b:1.00
+J|J:rrrb/crrr        -> c:0.00, b:1.00
+J|J:cc/crrr          -> c:0.00, b:1.00
+J|J:crb/crrr         -> c:0.00, b:1.00
+J|J:crrb/crrr        -> c:0.00, b:1.00
+J|J:crrrb/crrr       -> c:0.00, b:1.00
+Q|J:rb/crrr          -> c:1.00, b:0.00
+Q|J:rrb/crrr         -> c:1.00, b:0.00
+Q|J:rrrb/crrr        -> c:0.50, b:0.50
+Q|J:cc/crrr          -> c:0.50, b:0.50
+Q|J:crb/crrr         -> c:0.98, b:0.02
+Q|J:crrb/crrr        -> c:1.00, b:0.00
+Q|J:crrrb/crrr       -> c:1.00, b:0.00
+K|J:rb/crrr          -> c:0.99, b:0.01
+K|J:rrb/crrr         -> c:0.01, b:0.99
+K|J:rrrb/crrr        -> c:0.64, b:0.36
+K|J:cc/crrr          -> c:0.50, b:0.50
+K|J:crb/crrr         -> c:0.00, b:1.00
+K|J:crrb/crrr        -> c:0.97, b:0.03
+K|J:crrrb/crrr       -> c:0.50, b:0.50
+J|Q:rb/              -> c:0.00, r:1.00
+J|Q:rrb/             -> c:0.74, r:0.26
+J|Q:rrrb/            -> c:1.00, r:0.00
+J|Q:cc/              -> c:0.89, r:0.11
+J|Q:crb/             -> c:0.03, r:0.97
+J|Q:crrb/            -> c:0.98, r:0.02
+J|Q:crrrb/           -> c:0.91, r:0.09
+Q|Q:rb/              -> c:0.39, r:0.61
+Q|Q:rrb/             -> c:0.00, r:1.00
+Q|Q:rrrb/            -> c:0.76, r:0.24
+Q|Q:cc/              -> c:0.61, r:0.39
+Q|Q:crb/             -> c:0.01, r:0.99
+Q|Q:crrb/            -> c:0.90, r:0.10
+Q|Q:crrrb/           -> c:0.01, r:0.99
+K|Q:rb/              -> c:1.00, r:0.00
+K|Q:rrb/             -> c:0.04, r:0.96
+K|Q:rrrb/            -> c:1.00, r:0.00
+K|Q:cc/              -> c:1.00, r:0.00
+K|Q:crb/             -> c:0.11, r:0.89
+K|Q:crrb/            -> c:0.99, r:0.01
+K|Q:crrrb/           -> c:0.65, r:0.35
+J|Q:rb/r             -> c:1.00, b:0.00, r:0.00
+J|Q:rrb/r            -> c:0.66, b:0.00, r:0.34
+J|Q:rrrb/r           -> c:0.52, b:0.00, r:0.48
+J|Q:cc/r             -> c:0.96, b:0.00, r:0.04
+J|Q:crb/r            -> c:0.96, b:0.00, r:0.04
+J|Q:crrb/r           -> c:0.80, b:0.00, r:0.20
+J|Q:crrrb/r          -> c:0.92, b:0.00, r:0.08
+Q|Q:rb/r             -> c:0.00, b:0.31, r:0.69
+Q|Q:rrb/r            -> c:0.00, b:0.00, r:1.00
+Q|Q:rrrb/r           -> c:0.00, b:0.00, r:1.00
+Q|Q:cc/r             -> c:0.00, b:0.00, r:1.00
+Q|Q:crb/r            -> c:0.00, b:0.00, r:1.00
+Q|Q:crrb/r           -> c:0.00, b:0.00, r:1.00
+Q|Q:crrrb/r          -> c:0.00, b:0.00, r:1.00
+K|Q:rb/r             -> c:0.67, b:0.33, r:0.00
+K|Q:rrb/r            -> c:0.33, b:0.67, r:0.00
+K|Q:rrrb/r           -> c:0.01, b:0.98, r:0.01
+K|Q:cc/r             -> c:0.08, b:0.38, r:0.54
+K|Q:crb/r            -> c:0.56, b:0.44, r:0.00
+K|Q:crrb/r           -> c:0.36, b:0.64, r:0.00
+K|Q:crrrb/r          -> c:0.18, b:0.68, r:0.14
+J|Q:rb/rr            -> c:1.00, b:0.00, r:0.00
+J|Q:rrb/rr           -> c:1.00, b:0.00, r:0.00
+J|Q:rrrb/rr          -> c:0.01, b:0.12, r:0.87
+J|Q:cc/rr            -> c:1.00, b:0.00, r:0.00
+J|Q:crb/rr           -> c:1.00, b:0.00, r:0.00
+J|Q:crrb/rr          -> c:0.97, b:0.00, r:0.03
+J|Q:crrrb/rr         -> c:0.00, b:0.00, r:1.00
+Q|Q:rb/rr            -> c:0.00, b:0.31, r:0.69
+Q|Q:rrb/rr           -> c:0.00, b:0.00, r:1.00
+Q|Q:rrrb/rr          -> c:0.00, b:0.14, r:0.86
+Q|Q:cc/rr            -> c:0.00, b:0.00, r:1.00
+Q|Q:crb/rr           -> c:0.00, b:0.00, r:1.00
+Q|Q:crrb/rr          -> c:0.00, b:0.00, r:1.00
+Q|Q:crrrb/rr         -> c:0.00, b:0.00, r:1.00
+K|Q:rb/rr            -> c:1.00, b:0.00, r:0.00
+K|Q:rrb/rr           -> c:0.62, b:0.38, r:0.00
+K|Q:rrrb/rr          -> c:0.77, b:0.11, r:0.12
+K|Q:cc/rr            -> c:0.43, b:0.28, r:0.28
+K|Q:crb/rr           -> c:1.00, b:0.00, r:0.00
+K|Q:crrb/rr          -> c:0.88, b:0.12, r:0.00
+K|Q:crrrb/rr         -> c:0.41, b:0.58, r:0.01
+J|Q:rb/rrr           -> c:0.97, b:0.03
+J|Q:rrb/rrr          -> c:1.00, b:0.00
+J|Q:rrrb/rrr         -> c:1.00, b:0.00
+J|Q:cc/rrr           -> c:1.00, b:0.00
+J|Q:crb/rrr          -> c:1.00, b:0.00
+J|Q:crrb/rrr         -> c:1.00, b:0.00
+J|Q:crrrb/rrr        -> c:0.96, b:0.04
+Q|Q:rb/rrr           -> c:0.00, b:1.00
+Q|Q:rrb/rrr          -> c:0.00, b:1.00
+Q|Q:rrrb/rrr         -> c:0.00, b:1.00
+Q|Q:cc/rrr           -> c:0.00, b:1.00
+Q|Q:crb/rrr          -> c:0.00, b:1.00
+Q|Q:crrb/rrr         -> c:0.00, b:1.00
+Q|Q:crrrb/rrr        -> c:0.00, b:1.00
+K|Q:rb/rrr           -> c:0.00, b:1.00
+K|Q:rrb/rrr          -> c:0.81, b:0.19
+K|Q:rrrb/rrr         -> c:0.00, b:1.00
+K|Q:cc/rrr           -> c:0.07, b:0.93
+K|Q:crb/rrr          -> c:0.02, b:0.98
+K|Q:crrb/rrr         -> c:0.00, b:1.00
+K|Q:crrrb/rrr        -> c:0.97, b:0.03
+J|Q:rb/c             -> c:0.01, r:0.99
+J|Q:rrb/c            -> c:0.23, r:0.77
+J|Q:rrrb/c           -> c:1.00, r:0.00
+J|Q:cc/c             -> c:0.93, r:0.07
+J|Q:crb/c            -> c:0.64, r:0.36
+J|Q:crrb/c           -> c:0.94, r:0.06
+J|Q:crrrb/c          -> c:1.00, r:0.00
+Q|Q:rb/c             -> c:0.00, r:1.00
+Q|Q:rrb/c            -> c:0.00, r:1.00
+Q|Q:rrrb/c           -> c:0.00, r:1.00
+Q|Q:cc/c             -> c:0.00, r:1.00
+Q|Q:crb/c            -> c:0.00, r:1.00
+Q|Q:crrb/c           -> c:0.00, r:1.00
+Q|Q:crrrb/c          -> c:0.00, r:1.00
+K|Q:rb/c             -> c:0.99, r:0.01
+K|Q:rrb/c            -> c:0.99, r:0.01
+K|Q:rrrb/c           -> c:0.55, r:0.45
+K|Q:cc/c             -> c:0.54, r:0.46
+K|Q:crb/c            -> c:0.76, r:0.24
+K|Q:crrb/c           -> c:0.41, r:0.59
+K|Q:crrrb/c          -> c:0.77, r:0.23
+J|Q:rb/cr            -> c:1.00, b:0.00, r:0.00
+J|Q:rrb/cr           -> c:1.00, b:0.00, r:0.00
+J|Q:rrrb/cr          -> c:1.00, b:0.00, r:0.00
+J|Q:cc/cr            -> c:1.00, b:0.00, r:0.00
+J|Q:crb/cr           -> c:1.00, b:0.00, r:0.00
+J|Q:crrb/cr          -> c:0.81, b:0.00, r:0.19
+J|Q:crrrb/cr         -> c:1.00, b:0.00, r:0.00
+Q|Q:rb/cr            -> c:0.00, b:0.00, r:1.00
+Q|Q:rrb/cr           -> c:0.00, b:0.00, r:1.00
+Q|Q:rrrb/cr          -> c:0.00, b:0.00, r:1.00
+Q|Q:cc/cr            -> c:0.00, b:0.00, r:1.00
+Q|Q:crb/cr           -> c:0.00, b:0.00, r:1.00
+Q|Q:crrb/cr          -> c:0.00, b:0.00, r:1.00
+Q|Q:crrrb/cr         -> c:0.00, b:0.00, r:1.00
+K|Q:rb/cr            -> c:0.51, b:0.49, r:0.00
+K|Q:rrb/cr           -> c:0.00, b:1.00, r:0.00
+K|Q:rrrb/cr          -> c:0.00, b:1.00, r:0.00
+K|Q:cc/cr            -> c:0.55, b:0.45, r:0.00
+K|Q:crb/cr           -> c:0.44, b:0.56, r:0.01
+K|Q:crrb/cr          -> c:0.30, b:0.70, r:0.00
+K|Q:crrrb/cr         -> c:0.01, b:0.99, r:0.00
+J|Q:rb/crr           -> c:1.00, b:0.00, r:0.00
+J|Q:rrb/crr          -> c:0.99, b:0.00, r:0.01
+J|Q:rrrb/crr         -> c:0.01, b:0.12, r:0.87
+J|Q:cc/crr           -> c:1.00, b:0.00, r:0.00
+J|Q:crb/crr          -> c:1.00, b:0.00, r:0.00
+J|Q:crrb/crr         -> c:1.00, b:0.00, r:0.00
+J|Q:crrrb/crr        -> c:0.02, b:0.14, r:0.84
+Q|Q:rb/crr           -> c:0.00, b:0.00, r:1.00
+Q|Q:rrb/crr          -> c:0.00, b:0.00, r:1.00
+Q|Q:rrrb/crr         -> c:0.00, b:0.00, r:1.00
+Q|Q:cc/crr           -> c:0.00, b:0.00, r:1.00
+Q|Q:crb/crr          -> c:0.00, b:0.00, r:1.00
+Q|Q:crrb/crr         -> c:0.00, b:0.27, r:0.73
+Q|Q:crrrb/crr        -> c:0.00, b:0.39, r:0.61
+K|Q:rb/crr           -> c:1.00, b:0.00, r:0.00
+K|Q:rrb/crr          -> c:0.21, b:0.77, r:0.02
+K|Q:rrrb/crr         -> c:0.22, b:0.21, r:0.57
+K|Q:cc/crr           -> c:0.33, b:0.33, r:0.33
+K|Q:crb/crr          -> c:0.99, b:0.00, r:0.00
+K|Q:crrb/crr         -> c:0.62, b:0.38, r:0.00
+K|Q:crrrb/crr        -> c:0.42, b:0.54, r:0.04
+J|Q:rb/crrr          -> c:0.50, b:0.50
+J|Q:rrb/crrr         -> c:0.97, b:0.03
+J|Q:rrrb/crrr        -> c:0.51, b:0.49
+J|Q:cc/crrr          -> c:0.50, b:0.50
+J|Q:crb/crrr         -> c:0.50, b:0.50
+J|Q:crrb/crrr        -> c:1.00, b:0.00
+J|Q:crrrb/crrr       -> c:1.00, b:0.00
+Q|Q:rb/crrr          -> c:0.00, b:1.00
+Q|Q:rrb/crrr         -> c:0.00, b:1.00
+Q|Q:rrrb/crrr        -> c:0.00, b:1.00
+Q|Q:cc/crrr          -> c:0.00, b:1.00
+Q|Q:crb/crrr         -> c:0.00, b:1.00
+Q|Q:crrb/crrr        -> c:0.00, b:1.00
+Q|Q:crrrb/crrr       -> c:0.00, b:1.00
+K|Q:rb/crrr          -> c:0.00, b:1.00
+K|Q:rrb/crrr         -> c:0.00, b:1.00
+K|Q:rrrb/crrr        -> c:0.99, b:0.01
+K|Q:cc/crrr          -> c:0.17, b:0.83
+K|Q:crb/crrr         -> c:0.00, b:1.00
+K|Q:crrb/crrr        -> c:1.00, b:0.00
+K|Q:crrrb/crrr       -> c:0.00, b:1.00
+J|K:rb/              -> c:0.11, r:0.89
+J|K:rrb/             -> c:0.99, r:0.01
+J|K:rrrb/            -> c:0.00, r:1.00
+J|K:cc/              -> c:0.92, r:0.08
+J|K:crb/             -> c:0.95, r:0.05
+J|K:crrb/            -> c:0.00, r:1.00
+J|K:crrrb/           -> c:0.53, r:0.47
+Q|K:rb/              -> c:0.62, r:0.38
+Q|K:rrb/             -> c:1.00, r:0.00
+Q|K:rrrb/            -> c:0.71, r:0.29
+Q|K:cc/              -> c:0.55, r:0.45
+Q|K:crb/             -> c:0.99, r:0.01
+Q|K:crrb/            -> c:0.06, r:0.94
+Q|K:crrrb/           -> c:0.66, r:0.34
+K|K:rb/              -> c:0.14, r:0.86
+K|K:rrb/             -> c:0.99, r:0.01
+K|K:rrrb/            -> c:0.00, r:1.00
+K|K:cc/              -> c:0.00, r:1.00
+K|K:crb/             -> c:0.87, r:0.13
+K|K:crrb/            -> c:0.00, r:1.00
+K|K:crrrb/           -> c:0.42, r:0.58
+J|K:rb/r             -> c:0.65, b:0.00, r:0.35
+J|K:rrb/r            -> c:0.71, b:0.00, r:0.29
+J|K:rrrb/r           -> c:1.00, b:0.00, r:0.00
+J|K:cc/r             -> c:1.00, b:0.00, r:0.00
+J|K:crb/r            -> c:0.95, b:0.00, r:0.05
+J|K:crrb/r           -> c:0.82, b:0.00, r:0.18
+J|K:crrrb/r          -> c:1.00, b:0.00, r:0.00
+Q|K:rb/r             -> c:0.63, b:0.37, r:0.00
+Q|K:rrb/r            -> c:0.34, b:0.66, r:0.00
+Q|K:rrrb/r           -> c:0.76, b:0.24, r:0.00
+Q|K:cc/r             -> c:0.26, b:0.74, r:0.00
+Q|K:crb/r            -> c:0.55, b:0.45, r:0.00
+Q|K:crrb/r           -> c:0.71, b:0.29, r:0.00
+Q|K:crrrb/r          -> c:0.29, b:0.71, r:0.00
+K|K:rb/r             -> c:0.00, b:0.00, r:1.00
+K|K:rrb/r            -> c:0.00, b:0.00, r:1.00
+K|K:rrrb/r           -> c:0.00, b:0.19, r:0.81
+K|K:cc/r             -> c:0.13, b:0.17, r:0.70
+K|K:crb/r            -> c:0.00, b:0.00, r:1.00
+K|K:crrb/r           -> c:0.00, b:0.00, r:1.00
+K|K:crrrb/r          -> c:0.00, b:0.00, r:1.00
+J|K:rb/rr            -> c:1.00, b:0.00, r:0.00
+J|K:rrb/rr           -> c:1.00, b:0.00, r:0.00
+J|K:rrrb/rr          -> c:1.00, b:0.00, r:0.00
+J|K:cc/rr            -> c:1.00, b:0.00, r:0.00
+J|K:crb/rr           -> c:0.98, b:0.00, r:0.02
+J|K:crrb/rr          -> c:1.00, b:0.00, r:0.00
+J|K:crrrb/rr         -> c:1.00, b:0.00, r:0.00
+Q|K:rb/rr            -> c:0.85, b:0.15, r:0.00
+Q|K:rrb/rr           -> c:0.99, b:0.00, r:0.00
+Q|K:rrrb/rr          -> c:0.89, b:0.04, r:0.07
+Q|K:cc/rr            -> c:0.00, b:0.75, r:0.25
+Q|K:crb/rr           -> c:1.00, b:0.00, r:0.00
+Q|K:crrb/rr          -> c:1.00, b:0.00, r:0.00
+Q|K:crrrb/rr         -> c:1.00, b:0.00, r:0.00
+K|K:rb/rr            -> c:0.00, b:0.00, r:1.00
+K|K:rrb/rr           -> c:0.00, b:0.07, r:0.93
+K|K:rrrb/rr          -> c:0.00, b:0.01, r:0.99
+K|K:cc/rr            -> c:0.00, b:0.00, r:1.00
+K|K:crb/rr           -> c:0.00, b:0.42, r:0.58
+K|K:crrb/rr          -> c:0.00, b:0.33, r:0.67
+K|K:crrrb/rr         -> c:0.00, b:0.33, r:0.67
+J|K:rb/rrr           -> c:1.00, b:0.00
+J|K:rrb/rrr          -> c:1.00, b:0.00
+J|K:rrrb/rrr         -> c:0.04, b:0.96
+J|K:cc/rrr           -> c:0.50, b:0.50
+J|K:crb/rrr          -> c:1.00, b:0.00
+J|K:crrb/rrr         -> c:1.00, b:0.00
+J|K:crrrb/rrr        -> c:0.50, b:0.50
+Q|K:rb/rrr           -> c:0.03, b:0.97
+Q|K:rrb/rrr          -> c:0.99, b:0.01
+Q|K:rrrb/rrr         -> c:0.00, b:1.00
+Q|K:cc/rrr           -> c:0.02, b:0.98
+Q|K:crb/rrr          -> c:0.50, b:0.50
+Q|K:crrb/rrr         -> c:0.50, b:0.50
+Q|K:crrrb/rrr        -> c:0.50, b:0.50
+K|K:rb/rrr           -> c:0.00, b:1.00
+K|K:rrb/rrr          -> c:0.00, b:1.00
+K|K:rrrb/rrr         -> c:0.00, b:1.00
+K|K:cc/rrr           -> c:0.10, b:0.90
+K|K:crb/rrr          -> c:0.00, b:1.00
+K|K:crrb/rrr         -> c:0.00, b:1.00
+K|K:crrrb/rrr        -> c:0.00, b:1.00
+J|K:rb/c             -> c:0.67, r:0.33
+J|K:rrb/c            -> c:0.00, r:1.00
+J|K:rrrb/c           -> c:0.34, r:0.66
+J|K:cc/c             -> c:0.99, r:0.01
+J|K:crb/c            -> c:0.51, r:0.49
+J|K:crrb/c           -> c:0.72, r:0.28
+J|K:crrrb/c          -> c:0.01, r:0.99
+Q|K:rb/c             -> c:0.60, r:0.40
+Q|K:rrb/c            -> c:0.42, r:0.58
+Q|K:rrrb/c           -> c:1.00, r:0.00
+Q|K:cc/c             -> c:0.95, r:0.05
+Q|K:crb/c            -> c:0.69, r:0.31
+Q|K:crrb/c           -> c:0.70, r:0.30
+Q|K:crrrb/c          -> c:0.94, r:0.06
+K|K:rb/c             -> c:0.00, r:1.00
+K|K:rrb/c            -> c:0.00, r:1.00
+K|K:rrrb/c           -> c:0.00, r:1.00
+K|K:cc/c             -> c:0.26, r:0.74
+K|K:crb/c            -> c:0.00, r:1.00
+K|K:crrb/c           -> c:0.00, r:1.00
+K|K:crrrb/c          -> c:0.00, r:1.00
+J|K:rb/cr            -> c:0.01, b:0.00, r:0.99
+J|K:rrb/cr           -> c:0.74, b:0.00, r:0.26
+J|K:rrrb/cr          -> c:0.16, b:0.16, r:0.67
+J|K:cc/cr            -> c:1.00, b:0.00, r:0.00
+J|K:crb/cr           -> c:0.97, b:0.00, r:0.03
+J|K:crrb/cr          -> c:0.33, b:0.33, r:0.33
+J|K:crrrb/cr         -> c:1.00, b:0.00, r:0.00
+Q|K:rb/cr            -> c:0.45, b:0.54, r:0.01
+Q|K:rrb/cr           -> c:0.69, b:0.31, r:0.00
+Q|K:rrrb/cr          -> c:0.96, b:0.04, r:0.00
+Q|K:cc/cr            -> c:0.00, b:0.64, r:0.36
+Q|K:crb/cr           -> c:0.44, b:0.56, r:0.00
+Q|K:crrb/cr          -> c:0.16, b:0.84, r:0.00
+Q|K:crrrb/cr         -> c:0.68, b:0.32, r:0.00
+K|K:rb/cr            -> c:0.00, b:0.00, r:1.00
+K|K:rrb/cr           -> c:0.00, b:0.00, r:1.00
+K|K:rrrb/cr          -> c:0.00, b:0.00, r:1.00
+K|K:cc/cr            -> c:0.01, b:0.01, r:0.97
+K|K:crb/cr           -> c:0.00, b:0.00, r:1.00
+K|K:crrb/cr          -> c:0.00, b:0.00, r:1.00
+K|K:crrrb/cr         -> c:0.00, b:0.00, r:1.00
+J|K:rb/crr           -> c:0.97, b:0.00, r:0.03
+J|K:rrb/crr          -> c:1.00, b:0.00, r:0.00
+J|K:rrrb/crr         -> c:1.00, b:0.00, r:0.00
+J|K:cc/crr           -> c:1.00, b:0.00, r:0.00
+J|K:crb/crr          -> c:1.00, b:0.00, r:0.00
+J|K:crrb/crr         -> c:1.00, b:0.00, r:0.00
+J|K:crrrb/crr        -> c:1.00, b:0.00, r:0.00
+Q|K:rb/crr           -> c:0.91, b:0.09, r:0.00
+Q|K:rrb/crr          -> c:1.00, b:0.00, r:0.00
+Q|K:rrrb/crr         -> c:0.07, b:0.35, r:0.58
+Q|K:cc/crr           -> c:0.00, b:0.99, r:0.01
+Q|K:crb/crr          -> c:1.00, b:0.00, r:0.00
+Q|K:crrb/crr         -> c:1.00, b:0.00, r:0.00
+Q|K:crrrb/crr        -> c:0.87, b:0.08, r:0.05
+K|K:rb/crr           -> c:0.00, b:0.00, r:1.00
+K|K:rrb/crr          -> c:0.00, b:0.38, r:0.62
+K|K:rrrb/crr         -> c:0.00, b:0.39, r:0.61
+K|K:cc/crr           -> c:0.12, b:0.19, r:0.69
+K|K:crb/crr          -> c:0.00, b:0.00, r:1.00
+K|K:crrb/crr         -> c:0.00, b:0.33, r:0.67
+K|K:crrrb/crr        -> c:0.00, b:0.00, r:1.00
+J|K:rb/crrr          -> c:1.00, b:0.00
+J|K:rrb/crrr         -> c:1.00, b:0.00
+J|K:rrrb/crrr        -> c:0.12, b:0.88
+J|K:cc/crrr          -> c:1.00, b:0.00
+J|K:crb/crrr         -> c:1.00, b:0.00
+J|K:crrb/crrr        -> c:0.50, b:0.50
+J|K:crrrb/crrr       -> c:0.50, b:0.50
+Q|K:rb/crrr          -> c:0.98, b:0.02
+Q|K:rrb/crrr         -> c:0.50, b:0.50
+Q|K:rrrb/crrr        -> c:0.50, b:0.50
+Q|K:cc/crrr          -> c:0.00, b:1.00
+Q|K:crb/crrr         -> c:0.02, b:0.98
+Q|K:crrb/crrr        -> c:0.00, b:1.00
+Q|K:crrrb/crrr       -> c:0.00, b:1.00
+K|K:rb/crrr          -> c:0.00, b:1.00
+K|K:rrb/crrr         -> c:0.00, b:1.00
+K|K:rrrb/crrr        -> c:0.00, b:1.00
+K|K:cc/crrr          -> c:0.01, b:0.99
+K|K:crb/crrr         -> c:0.00, b:1.00
+K|K:crrb/crrr        -> c:0.00, b:1.00
+K|K:crrrb/crrr       -> c:0.00, b:1.00

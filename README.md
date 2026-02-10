@@ -6,35 +6,43 @@ An exploitative poker AI using GTO followed by opponent modelling.
 
 TiltStack is a poker AI project that combines Game Theory Optimal (GTO) strategy computation with opponent modeling to create an exploitative poker agent. The project uses Counterfactual Regret Minimization (CFR) to compute Nash equilibrium strategies, then adapts play based on observed opponent tendencies.
 
+The CFR solver is implemented in C++ for performance and exposed to Python via PyBind11 as the `leducsolver` module. Training orchestration, output, and analysis remain in Python.
+
 ## Repository Structure
 
 ```
 TiltStack/
+├── Makefile              # Build system (install, build, test, clean)
+├── setup.py              # PyBind11 compilation config
 ├── src/
-│   ├── pysrc/          # High-level Python implementation
-│   │   ├── Node.py     # Game tree node definitions and utilities
-│   │   ├── Leduc.py    # Leduc Hold'em CFR solver
-│   │   └── ...
-│   └── cppsrc/         # Performance-critical C++ code (PyBind11)
-│       └── ...
+│   ├── pysrc/
+│   │   ├── Leduc.py      # Training loop, output, and analysis (uses C++ solver)
+│   │   └── Node.py       # Pure-Python reference implementation
+│   └── cppsrc/
+│       ├── Node.h         # Game tree types: Action, Rank, NodeInfo, Node
+│       ├── Node.cpp        # Node/NodeInfo implementation
+│       ├── Leduc.h         # LeducSolver class declaration
+│       ├── Leduc.cpp       # CFR solver implementation
+│       └── bindings.cpp    # PyBind11 module (leducsolver)
 ├── demos/
-│   └── kuhn/           # Kuhn Poker reference implementation
+│   └── kuhn/              # Kuhn Poker reference implementation
 │       ├── Node.py
 │       └── Kuhn.py
 └── README.md
 ```
 
-### src/pysrc
+### src/cppsrc — C++ Solver
 
-Contains the high-level Python implementation of the poker AI. This includes:
+The performance-critical CFR solver, compiled into the `leducsolver` Python module:
 
-- **Node.py**: Core game tree abstractions including `Action`, `Rank`, `NodeInfo`, and `Node` classes. Handles game state representation, legal move generation, payout calculation, and regret tracking for CFR.
+- **Node.h / Node.cpp**: Core game tree types — `Action`, `Rank`, `Outcome` enums, `NodeInfo` (game state decoding, legal moves, payouts, hash transitions), and `Node` (regret-matched strategy computation).
+- **Leduc.h / Leduc.cpp**: `LeducSolver` class containing the node table and recursive `cfr()` method.
+- **bindings.cpp**: PyBind11 bindings exposing `LeducSolver`, `Node`, `NodeInfo`, `Action`, `Rank`, and `ActionList` to Python.
 
-- **Leduc.py**: CFR solver for Leduc Hold'em poker. Implements the full CFR algorithm with proper information set handling and strategy accumulation.
+### src/pysrc — Python Layer
 
-### src/cppsrc
-
-Will contain performance-critical C++ code exposed to Python via PyBind11. This allows the project to maintain a clean Python API while achieving the performance necessary for solving larger poker variants.
+- **Leduc.py**: `Leduc` class that wraps a C++ `LeducSolver`. Handles the training loop (card dealing and weighting), strategy output, and hash-to-string conversion.
+- **Node.py**: Pure-Python reference implementation of the same logic (useful for prototyping and verification).
 
 ### demos/kuhn
 
@@ -45,16 +53,17 @@ Reference implementation of CFR for Kuhn Poker, a simplified 3-card poker game. 
 ```bash
 make install  # Install dependencies (pybind11)
 make          # Build C++ extensions
-make test     # Run tests
+make test     # Build and run the Leduc solver
+make clean    # Remove build artifacts
 ```
 
-See [QUICK_START.md](QUICK_START.md) for more details. The Makefile works on both Linux and Windows.
+See [QUICK_START.md](QUICK_START.md) for detailed setup instructions and [PYBIND11_README.md](PYBIND11_README.md) for the C++/Python binding architecture.
 
 ## Current Status
 
-- Leduc Hold'em CFR solver implemented and verified
+- Leduc Hold'em CFR solver implemented in C++ and exposed via PyBind11
+- Python training loop and strategy output working against the C++ backend
 - Kuhn Poker demo available for reference
-- C++ backend with PyBind11 integration for performance optimization
 
 ## Authors
 

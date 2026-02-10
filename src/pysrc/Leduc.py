@@ -1,41 +1,8 @@
-from Node import *
+from leducsolver import LeducSolver, NodeInfo, Rank, Action
 
 class Leduc:
     def __init__(self):
-        self.nodes = [Node() for _ in range(528)]
-
-    def cfr(self, cards: list[Rank], hash: int, prob: list[float]) -> float:
-        info = NodeInfo(hash)
-        stm = info.stm()
-
-        moves = info.moves()
-
-        node_strat = self.nodes[hash].get_current_strategy(prob[stm], moves)
-        node_util = 0.0
-        action_utils = [0.0] * len(moves)
-
-        for i in range(len(moves)):
-            a = moves[i]
-            next_prob = prob.copy()
-            next_prob[stm] *= node_strat[a.value]
-
-            if info.ends_hand(a):
-                action_utils[i] = info.payout(a, cards[1 - stm])
-
-            else:
-                next_stm = info.next_stm(a)
-                action_utils[i] = self.cfr(cards, info.next_hash(a, cards[2], cards[next_stm]), next_prob)
-
-                if stm != next_stm:
-                    action_utils[i] *= -1
-
-            node_util += node_strat[a.value] * action_utils[i]
-
-        for j in range(len(moves)):
-            regret = action_utils[j] - node_util
-            self.nodes[hash].regrets[moves[j].value] += regret * prob[1 - stm]
-
-        return node_util
+        self.solver = LeducSolver()
 
     def train(self, n: int):
         for _ in range(n):
@@ -50,7 +17,7 @@ class Leduc:
                         weight = 4.0 if (p0 == p1 or p0 == c or p1 == c) else 8.0
 
                         cards = [Rank(p0), Rank(p1), Rank(c)]
-                        self.cfr(cards, p0 * 8, [weight, weight])
+                        self.solver.cfr(cards, p0 * 8, [weight, weight])
 
     @staticmethod
     def hash_to_string(hash: int) -> str:
@@ -78,6 +45,8 @@ class Leduc:
             r1_history += 'r' * (r1_s % 4)
             if r1_s > 0:
                 r1_history += 'b'  # call that ended round 1
+            else:
+                r1_history += 'c'  # second check that ended round 1
 
             # Build round 2 history
             r2_history = ""
@@ -101,6 +70,8 @@ class Leduc:
 
     def write_results(self, filename: str):
         """Write all 528 strategies to a file"""
+        action_chars = ['c', 'b', 'r']
+
         with open(filename, 'w') as f:
             f.write("Leduc Poker CFR Results\n")
             f.write("=" * 60 + "\n\n")
@@ -110,10 +81,10 @@ class Leduc:
             for h in range(24):
                 info = NodeInfo(h)
                 moves = info.moves()
-                strat = self.nodes[h].get_stored_strategy(moves)
+                strat = self.solver[h].get_stored_strategy(moves)
 
                 readable = self.hash_to_string(h)
-                strat_str = [f"{action_chars[a.value]}:{strat[a.value]:.4f}"
+                strat_str = [f"{action_chars[a.value]}:{strat[a.value]:.2f}"
                             for a in moves]
                 f.write(f"{readable:12} -> {', '.join(strat_str)}\n")
 
@@ -122,32 +93,25 @@ class Leduc:
             for h in range(24, 528):
                 info = NodeInfo(h)
                 moves = info.moves()
-                strat = self.nodes[h].get_stored_strategy(moves)
+                strat = self.solver[h].get_stored_strategy(moves)
 
                 readable = self.hash_to_string(h)
-                strat_str = [f"{action_chars[a.value]}:{strat[a.value]:.4f}"
+                strat_str = [f"{action_chars[a.value]}:{strat[a.value]:.2f}"
                             for a in moves]
                 f.write(f"{readable:20} -> {', '.join(strat_str)}\n")
 
 
-action_chars = ['c', 'b', 'r']
-
 if __name__ == "__main__":
     leduc = Leduc()
 
-    iterations = 10000
+    iterations = 100000
     print(f"Training Leduc Poker CFR for {iterations} iterations...")
 
     for i in range(iterations):
-        if (i + 1) % 100 == 0:
+        if (i + 1) % 1000 == 0:
             print(f"Iteration {i + 1}/{iterations} complete")
         leduc.train(1)
 
     print("\nTraining complete! Writing results to leduc_results.txt...")
     leduc.write_results("leduc_results.txt")
     print("Results written to leduc_results.txt")
-
-        
-
-                
-
