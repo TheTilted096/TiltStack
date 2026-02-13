@@ -5,6 +5,7 @@ C++ to Python bindings using PyBind11 with a simple Makefile.
 ## Quick Start
 
 ```bash
+cd demos/leduc
 make install  # Install pybind11
 make          # Build
 make test     # Build and run CFR solver
@@ -22,7 +23,7 @@ make clean    # Clean build artifacts and output files
 ## Project Structure
 
 ```
-TiltStack/
+demos/leduc/
 ├── Makefile                # Build system
 ├── setup.py                # Compiler configuration
 ├── build/                  # Build artifacts

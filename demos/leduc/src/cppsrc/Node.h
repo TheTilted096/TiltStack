@@ -1,3 +1,10 @@
+/**
+ * Node.h - Leduc Hold'em CFR+ Node Implementation
+ *
+ * Defines game state information (NodeInfo) and CFR nodes (Node) for
+ * Leduc Hold'em poker. Nodes store accumulated strategy (double precision)
+ * and regrets (float) with batched flooring for CFR+.
+ */
 #pragma once
 
 #include <array>
@@ -45,11 +52,13 @@ using Strategy = std::array<float, 3>;
 
 class Node{
     public:
-        Strategy strategy;
+        std::array<double, 3> strategy;  // Use double for accumulated strategy (precision!)
         std::array<float, 3> regrets;
+        std::array<float, 3> regret_deltas;  // Accumulated regret changes for batched flooring
 
         Node();
 
-        Strategy get_current_strategy(const float&, const ActionList&);
+        Strategy get_current_strategy(const double&, const ActionList&, int, bool);
         Strategy get_stored_strategy(const ActionList&);
+        void flush_regrets();  // Apply deltas and floor
 };

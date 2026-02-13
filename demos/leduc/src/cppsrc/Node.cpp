@@ -157,9 +157,9 @@ Hash NodeInfo::next_hash(const Action& a, const Rank& c, const Rank& next_card){
 
 // --- Node ---
 
-Node::Node() : strategy({0.0f, 0.0f, 0.0f}), regrets({0.0f, 0.0f, 0.0f}) {}
+Node::Node() : strategy({0.0, 0.0, 0.0}), regrets({0.0f, 0.0f, 0.0f}), regret_deltas({0.0f, 0.0f, 0.0f}) {}
 
-Strategy Node::get_current_strategy(const float& p, const ActionList& legal){
+Strategy Node::get_current_strategy(const double& p, const ActionList& legal, int iteration, bool accumulate_strategy){
     Strategy strat = {0.0f, 0.0f, 0.0f};
 
     // Sum positive regrets for legal actions
@@ -180,27 +180,41 @@ Strategy Node::get_current_strategy(const float& p, const ActionList& legal){
         }
     }
 
-    // Accumulate weighted strategy
-    for(int i = 0; i < 3; i++)
-        strategy[i] += strat[i] * p;
+    // CFR+: Linear weighting for strategy with delay (only accumulate once per iteration)
+    // Use double precision for accumulated weights to prevent precision loss
+    if(accumulate_strategy){
+        const int DELAY = 500;
+        double weight = static_cast<double>(std::max(0, iteration - DELAY));
+        for(int i = 0; i < 3; i++)
+            strategy[i] += static_cast<double>(strat[i]) * p * weight;
+    }
 
     return strat;
 }
 
+void Node::flush_regrets(){
+    // CFR+: Apply accumulated deltas and floor at 0
+    for(int i = 0; i < 3; i++){
+        regrets[i] += regret_deltas[i];
+        regrets[i] = std::max(0.0f, regrets[i]);
+        regret_deltas[i] = 0.0f;  // Reset for next iteration
+    }
+}
+
 Strategy Node::get_stored_strategy(const ActionList& legal){
-    float normalizing_sum = 0.0f;
+    double normalizing_sum = 0.0;
     for(int i = 0; i < legal.len; i++)
         normalizing_sum += strategy[legal.al[i]];
 
     Strategy stored = {0.0f, 0.0f, 0.0f};
 
-    if(normalizing_sum == 0.0f){
+    if(normalizing_sum == 0.0){
         float uniform = 1.0f / legal.len;
         for(int i = 0; i < legal.len; i++)
             stored[legal.al[i]] = uniform;
     } else {
         for(int i = 0; i < legal.len; i++)
-            stored[legal.al[i]] = strategy[legal.al[i]] / normalizing_sum;
+            stored[legal.al[i]] = static_cast<float>(strategy[legal.al[i]] / normalizing_sum);
     }
 
     return stored;

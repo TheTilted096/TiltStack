@@ -1,3 +1,9 @@
+/**
+ * BestResponse.h - Exploitability Computation
+ *
+ * Computes best response strategies against a fixed opponent strategy
+ * to measure exploitability (distance from Nash equilibrium).
+ */
 #pragma once
 
 #include <vector>

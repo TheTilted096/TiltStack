@@ -44,6 +44,8 @@ PYBIND11_MODULE(leducsolver, m) {
     py::class_<LeducSolver>(m, "LeducSolver")
         .def(py::init<>())
         .def("cfr", &LeducSolver::cfr)
+        .def("flush_regrets", &LeducSolver::flush_regrets)
+        .def("get_all_strategies", &LeducSolver::get_all_strategies)
         .def("__getitem__", [](LeducSolver& s, int i) -> Node& { return s.nodes[i]; },
              py::return_value_policy::reference_internal);
 
