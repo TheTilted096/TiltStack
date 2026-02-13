@@ -7,8 +7,9 @@ C++ to Python bindings using PyBind11 with a simple Makefile.
 ```bash
 make install  # Install pybind11
 make          # Build
-make test     # Build and run solver
-make clean    # Clean
+make test     # Build and run CFR solver
+make best     # Build and compute Best Response
+make clean    # Clean build artifacts and output files
 ```
 
 ## How It Works
@@ -22,19 +23,22 @@ make clean    # Clean
 
 ```
 TiltStack/
-├── Makefile              # Build system
-├── setup.py              # Compiler configuration
-├── build/                # Build artifacts
+├── Makefile                # Build system
+├── setup.py                # Compiler configuration
+├── build/                  # Build artifacts
 └── src/
     ├── cppsrc/
-    │   ├── Node.h         # Types: Action, Rank, NodeInfo, Node
-    │   ├── Node.cpp        # Game tree implementation
-    │   ├── Leduc.h         # LeducSolver declaration
-    │   ├── Leduc.cpp       # CFR solver implementation
-    │   └── bindings.cpp    # PyBind11 bindings (leducsolver module)
+    │   ├── Node.h           # Types: Action, Rank, NodeInfo, Node
+    │   ├── Node.cpp         # Game tree implementation
+    │   ├── Leduc.h          # LeducSolver declaration
+    │   ├── Leduc.cpp        # CFR solver implementation
+    │   ├── BestResponse.h   # BestResponse declaration
+    │   ├── BestResponse.cpp # Best Response solver implementation
+    │   └── bindings.cpp     # PyBind11 bindings (leducsolver module)
     └── pysrc/
-        ├── *.pyd/*.so      # Compiled module (copied here after build)
-        └── Leduc.py        # Python training loop and output
+        ├── *.pyd/*.so          # Compiled module (copied here after build)
+        ├── Leduc.py            # CFR training loop and output
+        └── BestResponse.py     # Best Response computation
 ```
 
 ## Architecture
@@ -44,6 +48,7 @@ The `leducsolver` module exposes the C++ solver to Python:
 | C++ Type | Python Access | Purpose |
 |---|---|---|
 | `LeducSolver` | `LeducSolver()` | Node table + `cfr()` method |
+| `BestResponse` | `BestResponse()` | Best Response solver + `compute()` method |
 | `Node` | `solver[hash]` | Strategy/regret storage per info set |
 | `NodeInfo` | `NodeInfo(hash)` | Decode hash into game state |
 | `ActionList` | Iterable | Legal actions at a node |
@@ -57,19 +62,28 @@ The `leducsolver` module exposes the C++ solver to Python:
 ```cpp
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "Leduc.cpp"
 #include "Node.cpp"
+#include "Leduc.cpp"
+#include "BestResponse.cpp"
 
 PYBIND11_MODULE(leducsolver, m) {
     py::class_<LeducSolver>(m, "LeducSolver")
         .def(py::init<>())
         .def("cfr", &LeducSolver::cfr)
         .def("__getitem__", ...);  // solver[hash] -> Node&
+
+    py::class_<BestResponse>(m, "BestResponse")
+        .def(py::init<>())
+        .def("load_strategy", &BestResponse::load_strategy)
+        .def("compute", &BestResponse::compute)
+        .def("get_ev", &BestResponse::get_ev)
+        .def("get_full_br_strategy", &BestResponse::get_full_br_strategy);
 }
 ```
 
 ### Python Usage
 
+**CFR Training:**
 ```python
 from leducsolver import LeducSolver, NodeInfo, Rank
 
@@ -82,6 +96,21 @@ solver.cfr([Rank.JACK, Rank.QUEEN, Rank.KING], 0, [8.0, 8.0])
 info = NodeInfo(0)
 moves = info.moves()
 strategy = solver[0].get_stored_strategy(moves)
+```
+
+**Best Response Computation:**
+```python
+from leducsolver import BestResponse
+
+# Load opponent strategy (from CSV or strategy list)
+br = BestResponse()
+br.load_strategy(opponent_strategy)  # List of 528 [c, b, r] probability arrays
+
+# Compute Best Response for player 0
+ev = br.compute(0)
+br_strategy = br.get_full_br_strategy()
+
+print(f"Player 0 Best Response EV: {ev:+.6f}")
 ```
 
 ## Compilation

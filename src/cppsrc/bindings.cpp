@@ -1,8 +1,9 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "Leduc.cpp"
 #include "Node.cpp"
+#include "Leduc.cpp"
+#include "BestResponse.cpp"
 
 namespace py = pybind11;
 
@@ -45,4 +46,12 @@ PYBIND11_MODULE(leducsolver, m) {
         .def("cfr", &LeducSolver::cfr)
         .def("__getitem__", [](LeducSolver& s, int i) -> Node& { return s.nodes[i]; },
              py::return_value_policy::reference_internal);
+
+    py::class_<BestResponse>(m, "BestResponse")
+        .def(py::init<>())
+        .def("load_strategy", &BestResponse::load_strategy)
+        .def("compute", &BestResponse::compute)
+        .def("get_ev", &BestResponse::get_ev)
+        .def("get_br_strategy_at", &BestResponse::get_br_strategy_at)
+        .def("get_full_br_strategy", &BestResponse::get_full_br_strategy);
 }

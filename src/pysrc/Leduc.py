@@ -1,3 +1,4 @@
+import os
 from leducsolver import LeducSolver, NodeInfo, Rank, Action
 
 class Leduc:
@@ -69,8 +70,12 @@ class Leduc:
         return f"{rank_names[private_card]}:{history}"
 
     def write_results(self, filename: str):
-        """Write all 528 strategies to a file"""
+        """Write all 528 strategies to a human-readable file"""
         action_chars = ['c', 'b', 'r']
+
+        # Warn if overwriting
+        if os.path.exists(filename):
+            print(f"\033[93mWarning: '{filename}' already exists and will be overwritten.\033[0m")
 
         with open(filename, 'w') as f:
             f.write("Leduc Poker CFR Results\n")
@@ -80,25 +85,40 @@ class Leduc:
             f.write("-" * 40 + "\n")
             for h in range(24):
                 info = NodeInfo(h)
+                player = info.stm()
                 moves = info.moves()
                 strat = self.solver[h].get_stored_strategy(moves)
 
                 readable = self.hash_to_string(h)
                 strat_str = [f"{action_chars[a.value]}:{strat[a.value]:.2f}"
                             for a in moves]
-                f.write(f"{readable:12} -> {', '.join(strat_str)}\n")
+                f.write(f"({player}) {readable:12} -> {', '.join(strat_str)}\n")
 
             f.write("\nRound 2 Nodes (24-527):\n")
             f.write("-" * 40 + "\n")
             for h in range(24, 528):
                 info = NodeInfo(h)
+                player = info.stm()
                 moves = info.moves()
                 strat = self.solver[h].get_stored_strategy(moves)
 
                 readable = self.hash_to_string(h)
                 strat_str = [f"{action_chars[a.value]}:{strat[a.value]:.2f}"
                             for a in moves]
-                f.write(f"{readable:20} -> {', '.join(strat_str)}\n")
+                f.write(f"({player}) {readable:20} -> {', '.join(strat_str)}\n")
+
+    def write_strategy_csv(self, filename: str):
+        """Write all 528 strategies to a machine-readable CSV file"""
+        if os.path.exists(filename):
+            print(f"\033[93mWarning: '{filename}' already exists and will be overwritten.\033[0m")
+
+        with open(filename, 'w') as f:
+            f.write("hash,check,bet,raise\n")
+            for h in range(528):
+                info = NodeInfo(h)
+                moves = info.moves()
+                strat = self.solver[h].get_stored_strategy(moves)
+                f.write(f"{h},{strat[0]:.6f},{strat[1]:.6f},{strat[2]:.6f}\n")
 
 
 if __name__ == "__main__":
@@ -112,6 +132,11 @@ if __name__ == "__main__":
             print(f"Iteration {i + 1}/{iterations} complete")
         leduc.train(1)
 
-    print("\nTraining complete! Writing results to leduc_results.txt...")
-    leduc.write_results("leduc_results.txt")
-    print("Results written to leduc_results.txt")
+    results_file = "leduc_results.txt"
+    strategy_file = "leduc_strategy.csv"
+
+    print(f"\nTraining complete! Writing results...")
+    leduc.write_results(results_file)
+    leduc.write_strategy_csv(strategy_file)
+    print(f"Human-readable results written to {results_file}")
+    print(f"Machine-readable strategy written to {strategy_file}")
