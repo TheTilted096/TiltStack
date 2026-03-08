@@ -16,7 +16,7 @@ class LeducSolver{
         std::vector<Node> nodes;
 
         LeducSolver();
-        float cfr(const std::array<Rank, 3>&, Hash, std::array<double, 2>, int, int, bool);
+        float cfr(const std::array<Rank, 3>&, Hash, std::array<double, 2>, int, int);
         void flush_regrets();
         std::vector<Strategy> get_all_strategies();
 };

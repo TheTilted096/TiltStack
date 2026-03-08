@@ -2,13 +2,14 @@
 
 LeducSolver::LeducSolver() : nodes(528) {}
 
-float LeducSolver::cfr(const std::array<Rank, 3>& cards, Hash hash, std::array<double, 2> prob, int iteration, int update_player, bool accumulate_strategy){
+float LeducSolver::cfr(const std::array<Rank, 3>& cards, Hash hash, std::array<double, 2> prob, int iteration, int update_player){
     NodeInfo info(hash);
     int stm = info.stm();
 
     ActionList moves = info.moves();
 
-    Strategy node_strat = nodes[hash].get_current_strategy(prob[stm], moves, iteration, accumulate_strategy);
+    bool should_acc = (stm == update_player);
+    Strategy node_strat = nodes[hash].get_current_strategy(prob[stm], moves, iteration, should_acc);
     float node_util = 0.0f;
     float action_utils[3] = {};
 
@@ -21,7 +22,7 @@ float LeducSolver::cfr(const std::array<Rank, 3>& cards, Hash hash, std::array<d
             action_utils[i] = info.payout(a, cards[1 - stm]);
         } else {
             int ns = info.next_stm(a);
-            action_utils[i] = (2 * (stm == ns) - 1) * cfr(cards, info.next_hash(a, cards[2], cards[ns]), next_prob, iteration, update_player, accumulate_strategy);
+            action_utils[i] = (2 * (stm == ns) - 1) * cfr(cards, info.next_hash(a, cards[2], cards[ns]), next_prob, iteration, update_player);
         }
 
         node_util += node_strat[a] * action_utils[i];
