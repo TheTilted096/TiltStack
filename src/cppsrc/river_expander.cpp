@@ -126,16 +126,19 @@ static void computeRow(hand_index_t idx,
 }
 
 int main(int argc, char* argv[]) {
-    // Parse args: [--sample <indices.bin>] <outfile|->
+    // Parse args: [--sample <indices.bin>] [--quiet] <outfile|->
     std::string outPath = "river_equities.bin";
     std::string samplePath;
     bool sampleMode = false;
+    bool quiet = false;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--sample" && i + 1 < argc) {
             sampleMode = true;
             samplePath = argv[++i];
+        } else if (arg == "--quiet") {
+            quiet = true;
         } else {
             outPath = arg;
         }
@@ -241,18 +244,20 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        auto dt = std::chrono::steady_clock::now() - t_expand;
-        double elapsed = std::chrono::duration<double>(dt).count();
-        double frac = static_cast<double>(batchEnd) / totalStates;
-        double eta = frac > 0 ? elapsed / frac * (1 - frac) : 0;
-        double rate = batchEnd / elapsed;
-        std::cerr << "\r  " << std::fixed << std::setprecision(2)
-                  << (100.0 * frac) << "%  ("
-                  << batchEnd << " / " << totalStates << ")  "
-                  << std::setprecision(0) << rate / 1e6 << "M states/s  "
-                  << "ETA " << static_cast<int>(eta / 60) << "m"
-                  << std::setprecision(0) << static_cast<int>(eta) % 60 << "s"
-                  << "   " << std::flush;
+        if (!quiet) {
+            auto dt = std::chrono::steady_clock::now() - t_expand;
+            double elapsed = std::chrono::duration<double>(dt).count();
+            double frac = static_cast<double>(batchEnd) / totalStates;
+            double eta = frac > 0 ? elapsed / frac * (1 - frac) : 0;
+            double rate = batchEnd / elapsed;
+            std::cerr << "\r  " << std::fixed << std::setprecision(2)
+                      << (100.0 * frac) << "%  ("
+                      << batchEnd << " / " << totalStates << ")  "
+                      << std::setprecision(0) << rate / 1e6 << "M states/s  "
+                      << "ETA " << static_cast<int>(eta / 60) << "m"
+                      << std::setprecision(0) << static_cast<int>(eta) % 60 << "s"
+                      << "   " << std::flush;
+        }
     }
 
     out->flush();

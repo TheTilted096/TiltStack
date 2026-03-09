@@ -129,4 +129,4 @@ $(CENTROIDS_PATH): $(SAMPLE_PATH) $(CLUSTER_SCRIPT) | $(OUTDIR)
 # Step 3: Stream all 2.4B states, assign cluster labels
 $(LABELS_PATH): $(EXPANDER) $(CENTROIDS_PATH) $(CLUSTER_SCRIPT) | $(OUTDIR)
 	@echo "==> Step 3/3: Assigning labels (streaming all states, $(THREADS) threads)..."
-	$(THREAD_ENV) $(EXPANDER) - | $(THREAD_ENV) python $(CLUSTER_SCRIPT) --assign-only $(CENTROIDS_PATH) --stdin $(GPU_FLAG) -o $(OUTDIR)/river
+	$(THREAD_ENV) $(EXPANDER) --quiet - | $(THREAD_ENV) python $(CLUSTER_SCRIPT) --assign-only $(CENTROIDS_PATH) --stdin $(GPU_FLAG) -o $(OUTDIR)/river
