@@ -1,0 +1,2 @@
+numpy
+faiss-cpu

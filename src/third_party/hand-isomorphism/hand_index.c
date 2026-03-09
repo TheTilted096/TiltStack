@@ -22,7 +22,7 @@ static void __attribute__((constructor)) hand_index_ctor() {
   }
 
   for(uint_fast32_t i=0; i<1<<RANKS; ++i) {
-    for(uint_fast32_t j=0, set=~i&(1<<RANKS)-1; j<RANKS; ++j, set&=set-1) {
+    for(uint_fast32_t j=0, set=~i&((1<<RANKS)-1); j<RANKS; ++j, set&=set-1) {
       nth_unset[i][j] = set?__builtin_ctz(set):0xff;
     }
   }
@@ -358,8 +358,8 @@ bool hand_indexer_init(uint_fast32_t rounds, const uint8_t cards_per_round[], ha
   for(uint_fast32_t i=0; i<rounds; ++i) {
     indexer->permutation_to_configuration[i] = calloc(indexer->permutations[i], sizeof(uint_fast32_t));
     indexer->permutation_to_pi[i] = calloc(indexer->permutations[i], sizeof(uint_fast32_t));
-    if (!indexer->permutation_to_configuration ||
-        !indexer->permutation_to_pi) {
+    if (!indexer->permutation_to_configuration[i] ||
+        !indexer->permutation_to_pi[i]) {
       hand_indexer_free(indexer);
       return false; 
     }
