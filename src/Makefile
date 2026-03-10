@@ -53,11 +53,11 @@ PIPE_SCRIPT    = $(PYSRC)/pipe_to_npy.py
 
 # Pipeline parameters (override on command line, e.g. make pipeline K=5000)
 K           = 30000
-SAMPLE_SIZE = 5000000
-NITER       = 15
+SAMPLE_SIZE = 20000000
+NITER       = 25
 SEED        = 42
 GPU         = auto
-THREADS     = 8
+THREADS     = 16
 
 # Pipeline output paths
 INDICES_PATH   = $(OUTDIR)/sample_indices.bin
