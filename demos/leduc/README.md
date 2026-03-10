@@ -45,7 +45,7 @@ pip install -r requirements.txt
 | **Speed** | 3,810 iterations/sec |
 | **vs Vanilla CFR** | 56x better solution quality |
 
-See `docs/PERFORMANCE.md` for detailed benchmarks.
+See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for algorithm details and convergence analysis.
 
 ## Repository Structure
 
