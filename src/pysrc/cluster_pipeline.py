@@ -116,7 +116,7 @@ class ClusterPipeline:
             return
 
         self.log(f"==> Step 0: Building {self.expander_name}...")
-        self.run_command(["make", self.expander_name])
+        self.run_command(["make"])
         self.log(f"Build complete.")
 
     def step_generate_indices(self):

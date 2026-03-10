@@ -1,22 +1,19 @@
 # ---------------------------------------------------------------------------
 #  src/Makefile
 #
-#  Builds river_expander and runs the 3-step river equity clustering pipeline.
-#  Also builds the hand_indexer pybind11 module for Python-side hand lookup.
+#  Builds poker equity expanders (river_expander, etc.) and the hand_indexer
+#  pybind11 module for Python-side hand lookup.
 #
 #  Usage (from src/):
-#    make                  # build river_expander
+#    make                  # build river_expander (default)
 #    make pybind           # build hand_indexer Python module
-#    make pipeline         # build + run full pipeline
-#    make clean            # remove build/ and intermediate output files
+#    make clean            # remove build/ and intermediate build files
 #    make clean-hard       # remove build/ and output/ entirely
 #
-#  Tunable parameters (override on command line):
-#    THREADS=16            # CPU thread limit (OpenMP + BLAS)
-#    GPU=yes               # force GPU on;  GPU=no to force off;  GPU=auto (default)
-#    SAMPLE_SIZE=10000000  # training sample size
-#    K=30000               # number of clusters
-#    NITER=15              # K-means iterations
+#  Clustering pipeline:
+#    python pysrc/cluster_pipeline.py [options]
+#
+#  See pysrc/cluster_pipeline.py for pipeline parameters.
 # ---------------------------------------------------------------------------
 
 CXX      = g++
@@ -45,25 +42,8 @@ else
   COPY_PYBIND  = cp -f $(BUILDDIR)/hand_indexer*.so $(PYSRC)/
 endif
 
-# Executables / scripts
-EXPANDER       = $(BUILDDIR)/river_expander
-INDICES_SCRIPT = $(PYSRC)/generate_sample_indices.py
-CLUSTER_SCRIPT = $(PYSRC)/river_clusterer.py
-PIPE_SCRIPT    = $(PYSRC)/pipe_to_npy.py
-
-# Pipeline parameters (override on command line, e.g. make pipeline K=5000)
-K           = 30000
-SAMPLE_SIZE = 20000000
-NITER       = 25
-SEED        = 42
-GPU         = auto
-THREADS     = 16
-
-# Pipeline output paths
-INDICES_PATH   = $(OUTDIR)/sample_indices.bin
-SAMPLE_PATH    = $(OUTDIR)/river_sample.npy
-CENTROIDS_PATH = $(OUTDIR)/river_centroids.npy
-LABELS_PATH    = $(OUTDIR)/river_labels.bin
+# Build outputs
+EXPANDER = $(BUILDDIR)/river_expander
 
 # Object files
 OBJS = $(BUILDDIR)/river_expander.o \
@@ -73,7 +53,7 @@ OBJS = $(BUILDDIR)/river_expander.o \
 
 # ---- Build targets --------------------------------------------------------
 
-.PHONY: all pybind clean clean-hard pipeline
+.PHONY: all pybind clean clean-hard
 
 all: $(EXPANDER)
 
@@ -108,7 +88,6 @@ clean:
 	-if exist $(BUILDDIR) rmdir /S /Q $(BUILDDIR)
 	-if exist hand_indexer.egg-info rmdir /S /Q hand_indexer.egg-info
 	-del /Q $(PYSRC)\hand_indexer.* 2>nul
-	-del /Q $(OUTDIR)\sample_indices.bin $(OUTDIR)\river_sample.npy $(OUTDIR)\*.png 2>nul
 
 clean-hard:
 	-if exist $(BUILDDIR) rmdir /S /Q $(BUILDDIR)
@@ -116,51 +95,7 @@ clean-hard:
 else
 clean:
 	rm -rf $(BUILDDIR) *.egg-info $(PYSRC)/hand_indexer.*
-	rm -f $(INDICES_PATH) $(SAMPLE_PATH) $(OUTDIR)/*.png
 
 clean-hard:
 	rm -rf $(BUILDDIR) $(OUTDIR)
 endif
-
-# ---- Pipeline targets ------------------------------------------------------
-
-# Thread limit — controls OpenMP (river_expander) and FAISS/BLAS (clusterer)
-THREAD_ENV = OMP_NUM_THREADS=$(THREADS) MKL_NUM_THREADS=$(THREADS) OPENBLAS_NUM_THREADS=$(THREADS)
-
-# Resolve GPU flag: "auto" probes at runtime, "yes"/"no" forces
-ifeq ($(GPU),auto)
-  GPU_FLAG = $(shell $(PYTHON) -c "import faiss; print('--gpu' if hasattr(faiss,'StandardGpuResources') and faiss.get_num_gpus()>0 else '')" 2>/dev/null)
-else ifeq ($(GPU),yes)
-  GPU_FLAG = --gpu
-else
-  GPU_FLAG =
-endif
-
-pipeline: $(LABELS_PATH)
-	@echo "==> Pipeline complete."
-	@echo "    Centroids: $(CENTROIDS_PATH)"
-	@echo "    Labels:    $(LABELS_PATH)"
-	@echo "    (You can delete $(SAMPLE_PATH) and $(INDICES_PATH) to reclaim ~3.4 GB)"
-
-$(OUTDIR):
-	$(MKDIR_OUT)
-
-# Step 1a: Generate random sample indices
-$(INDICES_PATH): $(INDICES_SCRIPT) | $(OUTDIR)
-	@echo "==> Step 1/3: Generating $(SAMPLE_SIZE) random indices..."
-	$(PYTHON) $< -n $(SAMPLE_SIZE) --seed $(SEED) -o $@
-
-# Step 1b: Compute equity vectors for sampled indices
-$(SAMPLE_PATH): $(EXPANDER) $(INDICES_PATH) $(PIPE_SCRIPT) | $(OUTDIR)
-	@echo "==> Step 1/3: Computing equity vectors for $(SAMPLE_SIZE) sampled hands..."
-	$(THREAD_ENV) $(EXPANDER) --sample $(INDICES_PATH) - | $(PYTHON) $(PIPE_SCRIPT) -o $@
-
-# Step 2: Train K-means centroids on the sample
-$(CENTROIDS_PATH): $(SAMPLE_PATH) $(CLUSTER_SCRIPT) | $(OUTDIR)
-	@echo "==> Step 2/3: Training K=$(K) centroids ($(NITER) iterations, $(THREADS) threads)..."
-	$(THREAD_ENV) $(PYTHON) $(CLUSTER_SCRIPT) --train-only $(SAMPLE_PATH) -k $(K) -i $(NITER) --seed $(SEED) $(GPU_FLAG) -o $(OUTDIR)/river
-
-# Step 3: Stream all 2.4B states, assign cluster labels
-$(LABELS_PATH): $(EXPANDER) $(CENTROIDS_PATH) $(CLUSTER_SCRIPT) | $(OUTDIR)
-	@echo "==> Step 3/3: Assigning labels (streaming all states, $(THREADS) threads)..."
-	$(THREAD_ENV) $(EXPANDER) --quiet - | $(THREAD_ENV) $(PYTHON) $(CLUSTER_SCRIPT) --assign-only $(CENTROIDS_PATH) --stdin $(GPU_FLAG) -o $(OUTDIR)/river
