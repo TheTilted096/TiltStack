@@ -118,6 +118,16 @@ def train_centroids(sample: np.ndarray, k: int, niter: int,
     return kmeans.centroids.copy()  # (k, d) float32
 
 
+def sort_centroids_by_ehs(centroids: np.ndarray) -> np.ndarray:
+    """Sort centroids by Effective Hand Strength (mean of vector elements).
+
+    Returns a new sorted copy of the centroids array.
+    """
+    ehs = centroids.mean(axis=1)
+    sort_idx = np.argsort(ehs)
+    return centroids[sort_idx]
+
+
 def assign_labels(mmap: np.ndarray, centroids: np.ndarray,
                   out_path: str, batch_size: int, gpu: bool) -> None:
     """Stream the full file and assign each vector to its nearest centroid.
@@ -290,6 +300,13 @@ def main():
               f"({sz_mb:.0f} MB, {time.time() - t0:.1f}s)", file=sys.stderr)
         centroids = train_centroids(
             sample, args.clusters, args.niter, args.seed, args.gpu)
+
+        print(f"Sorting {centroids.shape[0]:,} centroids by EHS...",
+              file=sys.stderr, end='', flush=True)
+        t0 = time.time()
+        centroids = sort_centroids_by_ehs(centroids)
+        print(f" done ({time.time() - t0:.1f}s)", file=sys.stderr)
+
         print(f"Saving centroids to {centroids_path}...", file=sys.stderr,
               end='', flush=True)
         t0 = time.time()
@@ -306,6 +323,12 @@ def main():
         sample = sample_vectors(mmap, args.sample_size, args.seed)
         centroids = train_centroids(
             sample, args.clusters, args.niter, args.seed, args.gpu)
+
+        print(f"Sorting {centroids.shape[0]:,} centroids by EHS...",
+              file=sys.stderr, end='', flush=True)
+        t0 = time.time()
+        centroids = sort_centroids_by_ehs(centroids)
+        print(f" done ({time.time() - t0:.1f}s)", file=sys.stderr)
 
         print(f"Saving centroids to {centroids_path}...", file=sys.stderr,
               end='', flush=True)
