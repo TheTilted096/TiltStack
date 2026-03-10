@@ -2,13 +2,14 @@
 #  src/Makefile
 #
 #  Builds river_expander and runs the 3-step river equity clustering pipeline.
+#  Also builds the hand_indexer pybind11 module for Python-side hand lookup.
 #
 #  Usage (from src/):
 #    make                  # build river_expander
+#    make pybind           # build hand_indexer Python module
 #    make pipeline         # build + run full pipeline
-#    make clean            # remove build artifacts
-#    make clean-intermediate  # remove pipeline intermediates (keeps centroids + labels)
-#    make clean-output     # remove all pipeline output files
+#    make clean            # remove build/ and intermediate output files
+#    make clean-hard       # remove build/ and output/ entirely
 #
 #  Tunable parameters (override on command line):
 #    THREADS=16            # CPU thread limit (OpenMP + BLAS)
@@ -25,15 +26,30 @@ CFLAGS   = -O3 -std=c99 -Wall
 
 # Directories
 CPPSRC      = cppsrc
+PYSRC       = pysrc
 THIRD_PARTY = third_party
 BUILDDIR    = build
 OUTDIR      = output
 
+# OS-specific commands
+ifeq ($(OS),Windows_NT)
+  SHELL        = cmd.exe
+  PYTHON       = py
+  MKDIR_BUILD  = if not exist $(BUILDDIR) mkdir $(BUILDDIR)
+  MKDIR_OUT    = if not exist $(OUTDIR) mkdir $(OUTDIR)
+  COPY_PYBIND  = copy /Y $(BUILDDIR)\hand_indexer*.pyd $(PYSRC)\ >nul 2>&1 || echo.
+else
+  PYTHON       = python3
+  MKDIR_BUILD  = mkdir -p $(BUILDDIR)
+  MKDIR_OUT    = mkdir -p $(OUTDIR)
+  COPY_PYBIND  = cp -f $(BUILDDIR)/hand_indexer*.so $(PYSRC)/
+endif
+
 # Executables / scripts
 EXPANDER       = $(BUILDDIR)/river_expander
-INDICES_SCRIPT = pysrc/generate_sample_indices.py
-CLUSTER_SCRIPT = pysrc/river_clusterer.py
-PIPE_SCRIPT    = pysrc/pipe_to_npy.py
+INDICES_SCRIPT = $(PYSRC)/generate_sample_indices.py
+CLUSTER_SCRIPT = $(PYSRC)/river_clusterer.py
+PIPE_SCRIPT    = $(PYSRC)/pipe_to_npy.py
 
 # Pipeline parameters (override on command line, e.g. make pipeline K=5000)
 K           = 30000
@@ -57,12 +73,12 @@ OBJS = $(BUILDDIR)/river_expander.o \
 
 # ---- Build targets --------------------------------------------------------
 
-.PHONY: all clean clean-intermediate clean-output pipeline
+.PHONY: all pybind clean clean-hard pipeline
 
 all: $(EXPANDER)
 
 $(BUILDDIR):
-	mkdir -p $(BUILDDIR)
+	$(MKDIR_BUILD)
 
 $(EXPANDER): $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^
@@ -79,28 +95,46 @@ $(BUILDDIR)/hand_index.o: $(THIRD_PARTY)/hand-isomorphism/hand_index.c | $(BUILD
 $(BUILDDIR)/deck.o: $(THIRD_PARTY)/hand-isomorphism/deck.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# ---- Pybind11 module (hand_indexer) ----------------------------------------
+
+pybind:
+	$(PYTHON) setup.py build_ext --build-lib=$(BUILDDIR) --build-temp=$(BUILDDIR)/temp
+	$(COPY_PYBIND)
+
+# ---- Clean targets ---------------------------------------------------------
+
+ifeq ($(OS),Windows_NT)
 clean:
-	rm -rf $(BUILDDIR)
+	-if exist $(BUILDDIR) rmdir /S /Q $(BUILDDIR)
+	-if exist hand_indexer.egg-info rmdir /S /Q hand_indexer.egg-info
+	-del /Q $(PYSRC)\hand_indexer.* 2>nul
+	-del /Q $(OUTDIR)\sample_indices.bin $(OUTDIR)\river_sample.npy $(OUTDIR)\*.png 2>nul
 
-clean-intermediate:
-	rm -f $(INDICES_PATH) $(SAMPLE_PATH)
+clean-hard:
+	-if exist $(BUILDDIR) rmdir /S /Q $(BUILDDIR)
+	-if exist $(OUTDIR) rmdir /S /Q $(OUTDIR)
+else
+clean:
+	rm -rf $(BUILDDIR) *.egg-info $(PYSRC)/hand_indexer.*
+	rm -f $(INDICES_PATH) $(SAMPLE_PATH) $(OUTDIR)/*.png
 
-clean-output:
-	rm -rf $(OUTDIR)
+clean-hard:
+	rm -rf $(BUILDDIR) $(OUTDIR)
+endif
+
+# ---- Pipeline targets ------------------------------------------------------
 
 # Thread limit — controls OpenMP (river_expander) and FAISS/BLAS (clusterer)
 THREAD_ENV = OMP_NUM_THREADS=$(THREADS) MKL_NUM_THREADS=$(THREADS) OPENBLAS_NUM_THREADS=$(THREADS)
 
 # Resolve GPU flag: "auto" probes at runtime, "yes"/"no" forces
 ifeq ($(GPU),auto)
-  GPU_FLAG = $(shell python -c "import faiss; print('--gpu' if hasattr(faiss,'StandardGpuResources') and faiss.get_num_gpus()>0 else '')" 2>/dev/null)
+  GPU_FLAG = $(shell $(PYTHON) -c "import faiss; print('--gpu' if hasattr(faiss,'StandardGpuResources') and faiss.get_num_gpus()>0 else '')" 2>/dev/null)
 else ifeq ($(GPU),yes)
   GPU_FLAG = --gpu
 else
   GPU_FLAG =
 endif
-
-# ---- Pipeline targets -----------------------------------------------------
 
 pipeline: $(LABELS_PATH)
 	@echo "==> Pipeline complete."
@@ -109,24 +143,24 @@ pipeline: $(LABELS_PATH)
 	@echo "    (You can delete $(SAMPLE_PATH) and $(INDICES_PATH) to reclaim ~3.4 GB)"
 
 $(OUTDIR):
-	mkdir -p $(OUTDIR)
+	$(MKDIR_OUT)
 
 # Step 1a: Generate random sample indices
 $(INDICES_PATH): $(INDICES_SCRIPT) | $(OUTDIR)
 	@echo "==> Step 1/3: Generating $(SAMPLE_SIZE) random indices..."
-	python $< -n $(SAMPLE_SIZE) --seed $(SEED) -o $@
+	$(PYTHON) $< -n $(SAMPLE_SIZE) --seed $(SEED) -o $@
 
 # Step 1b: Compute equity vectors for sampled indices
 $(SAMPLE_PATH): $(EXPANDER) $(INDICES_PATH) $(PIPE_SCRIPT) | $(OUTDIR)
 	@echo "==> Step 1/3: Computing equity vectors for $(SAMPLE_SIZE) sampled hands..."
-	$(THREAD_ENV) $(EXPANDER) --sample $(INDICES_PATH) - | python $(PIPE_SCRIPT) -o $@
+	$(THREAD_ENV) $(EXPANDER) --sample $(INDICES_PATH) - | $(PYTHON) $(PIPE_SCRIPT) -o $@
 
 # Step 2: Train K-means centroids on the sample
 $(CENTROIDS_PATH): $(SAMPLE_PATH) $(CLUSTER_SCRIPT) | $(OUTDIR)
 	@echo "==> Step 2/3: Training K=$(K) centroids ($(NITER) iterations, $(THREADS) threads)..."
-	$(THREAD_ENV) python $(CLUSTER_SCRIPT) --train-only $(SAMPLE_PATH) -k $(K) -i $(NITER) --seed $(SEED) $(GPU_FLAG) -o $(OUTDIR)/river
+	$(THREAD_ENV) $(PYTHON) $(CLUSTER_SCRIPT) --train-only $(SAMPLE_PATH) -k $(K) -i $(NITER) --seed $(SEED) $(GPU_FLAG) -o $(OUTDIR)/river
 
 # Step 3: Stream all 2.4B states, assign cluster labels
 $(LABELS_PATH): $(EXPANDER) $(CENTROIDS_PATH) $(CLUSTER_SCRIPT) | $(OUTDIR)
 	@echo "==> Step 3/3: Assigning labels (streaming all states, $(THREADS) threads)..."
-	$(THREAD_ENV) $(EXPANDER) --quiet - | $(THREAD_ENV) python $(CLUSTER_SCRIPT) --assign-only $(CENTROIDS_PATH) --stdin $(GPU_FLAG) -o $(OUTDIR)/river
+	$(THREAD_ENV) $(EXPANDER) --quiet - | $(THREAD_ENV) $(PYTHON) $(CLUSTER_SCRIPT) --assign-only $(CENTROIDS_PATH) --stdin $(GPU_FLAG) -o $(OUTDIR)/river

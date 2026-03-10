@@ -5,7 +5,23 @@
 #include <string.h>
 #include "hand_index.h"
 
-#define MAX_GROUP_INDEX        0x100000 
+/* MSVC compatibility shims for GCC builtins */
+#ifdef _MSC_VER
+#include <intrin.h>
+#pragma intrinsic(_BitScanForward)
+static __inline unsigned int compat_ctz(unsigned int x) {
+    unsigned long ret;
+    _BitScanForward(&ret, x);
+    return (unsigned int)ret;
+}
+static __inline unsigned int compat_popcount(unsigned int x) {
+    return (unsigned int)__popcnt(x);
+}
+#define __builtin_ctz       compat_ctz
+#define __builtin_popcount  compat_popcount
+#endif
+
+#define MAX_GROUP_INDEX        0x100000
 #define MAX_CARDS_PER_ROUND    15
 #define ROUND_SHIFT            4
 #define ROUND_MASK             0xf
@@ -14,7 +30,7 @@ static uint8_t nth_unset[1<<RANKS][RANKS];
 static bool equal[1<<(SUITS-1)][SUITS];
 static uint_fast32_t nCr_ranks[RANKS+1][RANKS+1], rank_set_to_index[1<<RANKS], index_to_rank_set[RANKS+1][1<<RANKS], (*suit_permutations)[SUITS];
 static hand_index_t nCr_groups[MAX_GROUP_INDEX][SUITS+1];
-static void __attribute__((constructor)) hand_index_ctor() {
+static void hand_index_ctor(void) {
   for(uint_fast32_t i=0; i<1<<(SUITS-1); ++i) {
     for(uint_fast32_t j=1; j<SUITS; ++j) {
       equal[i][j] = i&1<<(j-1);
@@ -280,11 +296,11 @@ void tabulate_permutations(uint_fast32_t round, uint_fast32_t count[], void * da
 
     int_fast32_t compare = 0;
     for(uint_fast32_t i=0; i<SUITS; ++i) {
-      uint_fast32_t this  = count[pi[i]];
+      uint_fast32_t cur   = count[pi[i]];
       uint_fast32_t other = indexer->configuration[round][mid][i];
-      if (other > this) {
+      if (other > cur) {
         compare = -1; break;
-      } else if (other < this) {
+      } else if (other < cur) {
         compare = 1; break;
       }
     }
@@ -302,6 +318,7 @@ void tabulate_permutations(uint_fast32_t round, uint_fast32_t count[], void * da
 }
 
 bool hand_indexer_init(uint_fast32_t rounds, const uint8_t cards_per_round[], hand_indexer_t * indexer) {
+  { static bool tables_ready = false; if (!tables_ready) { hand_index_ctor(); tables_ready = true; } }
   if (rounds == 0) {
     return false;
   }

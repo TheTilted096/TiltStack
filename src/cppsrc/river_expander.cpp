@@ -42,9 +42,7 @@ Nathaniel Potter, 03-08-2026
 #include "../third_party/OMPEval/omp/HandEvaluator.h"
 
 extern "C" {
-#define _Bool bool
 #include "../third_party/hand-isomorphism/hand_index.h"
-#undef _Bool
 }
 
 static constexpr int NUM_BUCKETS = 169;
