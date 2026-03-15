@@ -15,12 +15,13 @@ TiltStack/
 │   ├── setup.py                #   PyBind11 config for hand_indexer
 │   ├── cppsrc/
 │   │   ├── river_expander.cpp  #   C++ river equity computation engine
+│   │   ├── turn_expander.cpp   #   C++ turn histogram computation engine
 │   │   └── bindings.cpp        #   PyBind11 bindings for hand_indexer
 │   ├── pysrc/
 │   │   ├── river_clusterer.py  #   K-means clustering (2.4B river states)
-│   │   ├── generate_sample_indices.py  # Random sampling for K-means training
-│   │   ├── pipe_to_npy.py      #   Binary-to-NumPy converter
-│   │   └── visualize_labels.py #   Cluster diagnostic visualizations
+│   │   ├── turn_clusterer.py   #   K-means clustering (~55M turn states)
+│   │   ├── river_visualize_labels.py # Cluster diagnostic visualizations
+│   │   └── turn_visualize_labels.py  # Cluster diagnostic visualizations
 │   └── third_party/
 │       ├── OMPEval/            #   Fast poker hand evaluator (C++)
 │       └── hand-isomorphism/   #   Isomorphic hand indexing (C)
@@ -44,19 +45,23 @@ TiltStack/
 
 ## src/ — Texas Hold'em Infrastructure
 
-The `src/` directory contains the Hold'em river equity clustering pipeline, which abstracts 2.4 billion river card states into ~30,000 strategic buckets.
+The `src/` directory contains the abstraction pipeline for Texas Hold'em, which consists of two main stages:
+1.  **River Clustering**: Abstracts ~2.4 billion river card states into 8,192 strategic buckets based on hand equity.
+2.  **Turn Clustering**: Abstracts ~55 million turn card states into 8,192 buckets based on the probability distribution of hitting each river bucket.
+
+This two-stage process reduces the complexity of the game tree while preserving key strategic information.
 
 ### C++ Engine (`src/cppsrc/`)
 
 - **river_expander.cpp**: Enumerates all river card combinations, computes equity vectors (169-dimensional, one entry per opponent hand class) using OMPEval for hand evaluation and hand-isomorphism for canonical indexing. Supports full enumeration (~2.4B states) and sampled subsets. Multi-threaded via OpenMP.
-- **bindings.cpp**: PyBind11 wrapper exposing the hand-isomorphism indexer to Python as the `hand_indexer` module.
+- **turn_expander.cpp**: For each canonical turn state, this enumerates all 46 possible river cards. For each river card, it finds the corresponding river cluster label (from the previous pipeline stage) and builds a 256-dimensional histogram of "wide" river buckets hit. This histogram serves as the feature vector for turn clustering.
+- **bindings.cpp**: PyBind11 wrapper exposing the `hand-isomorphism` indexer to Python as the `hand_indexer` module. This module includes `RiverExpander` and `TurnExpander` classes.
 
 ### Python Scripts (`src/pysrc/`)
 
-- **river_clusterer.py**: Two-phase K-means clustering using FAISS. Phase 1: train centroids on a ~20M sample. Phase 2: stream all 2.4B vectors and assign each to the nearest centroid. Supports GPU acceleration.
-- **generate_sample_indices.py**: Generates N sorted unique random indices from [0, 2.4B) for sampling the training set. Outputs a binary uint64 file.
-- **pipe_to_npy.py**: Reads raw uint8 equity vectors from stdin and saves them as a float32 `.npy` file. Used in the `river_expander | pipe_to_npy` pipeline.
-- **visualize_labels.py**: Produces diagnostic plots (histograms, PCA projections, cosine similarity heatmaps, example hands) to evaluate cluster quality.
+- **river_cluster_pipeline.py / river_clusterer.py**: A two-phase K-means clustering pipeline using FAISS. Phase 1 trains centroids on a sample of river states. Phase 2 streams all ~2.4B vectors, assigning each to the nearest centroid to generate the final labels.
+- **turn_cluster_pipeline.py / turn_clusterer.py**: A similar K-means pipeline for turn states. It uses the histograms from `TurnExpander` as feature vectors and clusters them using L1 distance. This depends on the outputs (`river_labels.bin` and `river_centroids.npy`) of the river pipeline.
+- **river_visualize_labels.py / turn_visualize_labels.py**: Scripts that produce diagnostic plots (histograms, PCA projections, example hands) to evaluate the quality of the river and turn clusters, respectively.
 
 ### Third-Party Libraries (`src/third_party/`)
 
@@ -65,19 +70,21 @@ The `src/` directory contains the Hold'em river equity clustering pipeline, whic
 
 ### Build & Pipeline (`src/Makefile`)
 
+The `Makefile` is used for building the `hand_indexer` PyBind11 module, which is a prerequisite for running the clustering pipelines.
+
 ```bash
 cd src
-make              # Build river_expander executable
 make pybind       # Build hand_indexer Python module
-make pipeline     # Run full 3-step clustering pipeline
 make clean        # Remove build artifacts
 ```
 
-Pipeline parameters (override via command line):
-- `K=30000` — number of clusters
-- `SAMPLE_SIZE=20000000` — training sample size
-- `THREADS=16` — CPU thread limit
-- `GPU=auto` — GPU acceleration (`yes`/`no`/`auto`)
+The clustering pipelines are executed directly via their Python scripts:
+```bash
+# Run the clustering pipelines
+python pysrc/river_cluster_pipeline.py
+python pysrc/turn_cluster_pipeline.py
+```
+Pipeline parameters can be passed as command line arguments to these scripts.
 
 ## demos/leduc — Leduc Hold'em Solver
 
@@ -105,9 +112,11 @@ Reference implementation of vanilla CFR for Kuhn Poker, a simplified 3-card poke
 ```
 numpy
 faiss-cpu
+pybind11
+matplotlib
 ```
 
-These are required for the Hold'em river clustering pipeline in `src/`. Install with:
+These are required for the Hold'em clustering pipelines in `src/`. Install with:
 ```bash
 pip install -r requirements.txt
 ```
@@ -127,9 +136,9 @@ matplotlib>=3.5.0
 - **C++ compiler**: C++20 support required for Leduc solver, C++11 for river_expander
   - Windows: MSVC (Visual Studio Build Tools)
   - Linux/Mac: g++ or clang++
-- **OpenMP**: Required for multi-threaded river equity computation (included with most compilers)
+- **OpenMP**: Required for multi-threaded equity computation (included with most compilers)
 
-No conda environment file is provided — use pip with the requirements files above.
+Requires a conda environment and python venv (TODO: Specify dependency setup)
 
 ## Getting Started
 
@@ -146,8 +155,11 @@ make best     # Compute Best Response exploitability
 ```bash
 cd src
 pip install -r ../requirements.txt
-make              # Build river_expander
-make pipeline     # Run full clustering pipeline (~2.4B states)
+make pybind       # Build hand_indexer Python module
+
+# Run the clustering pipelines
+python pysrc/river_cluster_pipeline.py
+python pysrc/turn_cluster_pipeline.py
 ```
 
 See [QUICK_START.md](QUICK_START.md) for detailed setup instructions.
@@ -156,7 +168,8 @@ See [QUICK_START.md](QUICK_START.md) for detailed setup instructions.
 
 - Leduc Hold'em CFR+ solver — converges to 0.00 mBB exploitability in 14k iterations
 - Best Response computation for exploitability measurement
-- Hold'em river equity clustering pipeline — 2.4B states into 30k buckets
+- Hold'em river equity clustering pipeline — 2.4B states into 8,192 buckets
+- Hold'em turn histogram clustering pipeline — ~55M states into 8,192 buckets
 - Hand evaluation and isomorphic indexing via third-party C/C++ libraries
 - Kuhn Poker demo available for reference
 

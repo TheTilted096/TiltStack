@@ -24,8 +24,8 @@ def parse_args():
         help="Path to river_labels.bin (uint16 binary)")
     p.add_argument("--centroids", default=None,
         help="Path to river_centroids.npy (optional, auto-detected)")
-    p.add_argument("-k", type=int, default=30_000,
-        help="Number of clusters (default: 30000)")
+    p.add_argument("-k", type=int, default=8192,
+        help="Number of clusters (default: 8192)")
     p.add_argument("-o", "--output", default=None,
         help="Output PNG path (default: <labels_dir>/river_labels_viz.png)")
     return p.parse_args()
@@ -41,6 +41,59 @@ def load_label_counts(path, k, chunk=100_000_000):
         end = min(start + chunk, n)
         counts += np.bincount(labels[start:end], minlength=k)
     return counts, n
+
+
+def load_counts_and_examples(path, k, cluster_ids, n_examples=5, seed=None,
+                             chunk=100_000_000):
+    """Single-pass scan: compute per-cluster counts and collect reservoir samples.
+
+    Combining both operations avoids a second full read of the labels file.
+    Reservoir sampling guarantees each returned index is chosen uniformly over
+    all matching states.
+    """
+    rng = np.random.default_rng(seed)
+    labels = np.memmap(path, dtype=np.uint16, mode="r")
+    n = len(labels)
+
+    counts    = np.zeros(k, dtype=np.int64)
+    reservoir = {cid: [] for cid in cluster_ids}
+    seen      = {cid: 0   for cid in cluster_ids}
+    target_set = set(cluster_ids)
+
+    for start in range(0, n, chunk):
+        end        = min(start + chunk, n)
+        chunk_data = np.array(labels[start:end])
+
+        counts += np.bincount(chunk_data, minlength=k)
+
+        for cid in target_set:
+            matches = np.where(chunk_data == cid)[0] + start
+            if len(matches) == 0:
+                continue
+
+            k0 = seen[cid]
+            m  = len(matches)
+            seen[cid] = k0 + m
+
+            # Fill empty slots directly
+            if k0 < n_examples:
+                fill = min(n_examples - k0, m)
+                reservoir[cid].extend(matches[:fill].tolist())
+                matches = matches[fill:]
+                k0 += fill
+                m  -= fill
+
+            # Reservoir replacement for remaining matches
+            if m > 0 and len(reservoir[cid]) == n_examples:
+                ranks  = np.arange(k0, k0 + m, dtype=np.int64)
+                accept = rng.random(m) < (n_examples / (ranks + 1))
+                if accept.any():
+                    chosen = matches[accept]
+                    slots  = rng.integers(0, n_examples, size=len(chosen))
+                    for gi, slot in zip(chosen.tolist(), slots.tolist()):
+                        reservoir[cid][slot] = gi
+
+    return counts, n, reservoir
 
 
 def load_centroids(path):
@@ -59,33 +112,18 @@ def try_import_hand_indexer():
         return None
 
 
-def find_example_indices(labels_path, cluster_ids, n_examples=5, chunk=100_000_000):
-    """Scan labels memmap to find example hand indices for each cluster."""
-    labels = np.memmap(labels_path, dtype=np.uint16, mode="r")
-    n = len(labels)
-    # {cluster_id: [list of hand indices]}
-    result = {cid: [] for cid in cluster_ids}
-    targets = set(cluster_ids)
-    done = set()
+def find_example_indices(labels_path, cluster_ids, n_examples=5, seed=None,
+                         chunk=100_000_000):
+    """Scan labels memmap to find n_examples random hand indices per cluster.
 
-    for start in range(0, n, chunk):
-        if len(done) == len(targets):
-            break
-        end = min(start + chunk, n)
-        chunk_data = np.array(labels[start:end])  # copy into RAM for fast ops
-        for cid in targets - done:
-            matches = np.where(chunk_data == cid)[0]
-            needed = n_examples - len(result[cid])
-            if needed > 0 and len(matches) > 0:
-                # Pick evenly spaced examples from matches
-                if len(matches) <= needed:
-                    pick = matches
-                else:
-                    pick = matches[np.linspace(0, len(matches)-1, needed, dtype=int)]
-                result[cid].extend((start + pick).tolist())
-                if len(result[cid]) >= n_examples:
-                    done.add(cid)
-    return result
+    Prefer load_counts_and_examples when counts are not yet known, to avoid
+    reading the file twice.
+    """
+    _, _, reservoir = load_counts_and_examples(
+        labels_path, max(cluster_ids) + 1, cluster_ids,
+        n_examples=n_examples, seed=seed, chunk=chunk,
+    )
+    return reservoir
 
 
 # ── Statistics ───────────────────────────────────────────────────────
@@ -424,11 +462,7 @@ def main():
 
     k = args.k
 
-    # Load data
-    print(f"Loading labels from {labels_path} ...")
-    counts, n = load_label_counts(labels_path, k)
-    print(f"  {n:,} labels loaded, K={k}")
-
+    # Load centroids first so we know which clusters to sample examples for
     centroids = load_centroids(centroids_path)
     has_centroids = centroids is not None
     if has_centroids:
@@ -436,13 +470,40 @@ def main():
     else:
         print(f"No centroids file found at {centroids_path} — skipping equity plots.")
 
-    # Print console stats
-    print_stats(counts, n, k)
-
-    # Pre-compute shared centroid features
+    # Pre-compute shared centroid features (needed to pick representatives)
     mean_ehs = proj = var_explained = None
     if has_centroids:
         mean_ehs, proj, var_explained = compute_centroid_features(centroids)
+
+    # Single-pass scan: counts + reservoir samples for representative clusters
+    indexer = try_import_hand_indexer()
+    hand_examples = None
+
+    if has_centroids and indexer:
+        reps = select_representatives(mean_ehs, np.ones(k, dtype=np.int64))
+        print(f"Loading labels from {labels_path} (single pass: counts + examples) ...")
+        counts, n, idx_map = load_counts_and_examples(
+            labels_path, k, reps.tolist(), n_examples=REP_N_EXAMPLES)
+        print(f"  {n:,} labels loaded, K={k}")
+
+        all_indices, index_owners = [], []
+        for ci in reps:
+            for idx in idx_map[ci]:
+                index_owners.append(ci)
+                all_indices.append(idx)
+        if all_indices:
+            card_lines = indexer.batch_unindex(all_indices)
+            hand_examples = {ci: [] for ci in reps}
+            for owner, line in zip(index_owners, card_lines):
+                hand_examples[owner].append(line)
+            print(f"  {len(card_lines)} example hands resolved.")
+    else:
+        print(f"Loading labels from {labels_path} ...")
+        counts, n = load_label_counts(labels_path, k)
+        print(f"  {n:,} labels loaded, K={k}")
+
+    # Print console stats
+    print_stats(counts, n, k)
 
     # ── Figure 1: Overview (2×3) ─────────────────────────────────────
     nrows = 2 if has_centroids else 1
@@ -472,27 +533,10 @@ def main():
     # ── Figure 3: Example hands ───────────────────────────────────
     if has_centroids:
         hands_path = base + "_hands" + ext
-        indexer = try_import_hand_indexer()
-        if indexer:
-            reps = select_representatives(mean_ehs, counts)
-            print(f"Finding example hands (hand_indexer module) ...")
-            idx_map = find_example_indices(labels_path, reps.tolist(),
-                                           n_examples=REP_N_EXAMPLES)
-            all_indices = []
-            index_owners = []
-            for ci in reps:
-                for idx in idx_map[ci]:
-                    index_owners.append(ci)
-                    all_indices.append(idx)
-            if all_indices:
-                card_lines = indexer.batch_unindex(all_indices)
-                hand_examples = {ci: [] for ci in reps}
-                for owner, line in zip(index_owners, card_lines):
-                    hand_examples[owner].append(line)
-                print(f"  {len(card_lines)} hands resolved.")
-                plot_hands(counts, mean_ehs, hands_path, hand_examples)
+        if hand_examples is not None:
+            plot_hands(counts, mean_ehs, hands_path, hand_examples)
         else:
-            print("hand_indexer module not found -- run 'make pybind' first.")
+            print("hand_indexer module not found — run 'make' first to build it.")
 
 
 if __name__ == "__main__":

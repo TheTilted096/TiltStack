@@ -1,2 +1,4 @@
 numpy
 faiss-cpu
+pybind11
+matplotlib
