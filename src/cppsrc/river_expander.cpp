@@ -100,7 +100,7 @@ void RiverExpander::computeRow(hand_index_t idx, uint8_t* row) const {
 void RiverExpander::compute_rows(const uint64_t* indices, size_t n,
                                  uint8_t* out) const {
     #pragma omp parallel for schedule(dynamic, 1024)
-    for (size_t i = 0; i < n; i++)
+    for (ptrdiff_t i = 0; i < (ptrdiff_t)n; i++)
         computeRow(indices[i], out + i * DIMS);
 }
 
