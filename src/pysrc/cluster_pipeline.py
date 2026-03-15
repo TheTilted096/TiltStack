@@ -1,245 +1,157 @@
 #!/usr/bin/env python3
 """
-Unified clustering pipeline for poker equity states.
+Clustering pipeline for river equity states.
 
 Orchestrates the full K-means clustering workflow:
-  1. Build C++ expander (if needed)
-  2. Generate random sample indices
-  3. Compute equity vectors for sampled indices
-  4. Train K-means centroids
-  5. Stream all states and assign cluster labels
+  1. Generate random sample indices
+  2. Compute equity vectors for sampled indices
+  3. Train K-means centroids on the sample
+  4. Stream all states and assign cluster labels
 
-Usage:
+Requires the hand_indexer pybind module to be built first:
+    cd src/ && make
+
+Then run:
     python cluster_pipeline.py
     python cluster_pipeline.py -k 30000 --sample-size 20000000 -t 16 --gpu
-
-All parameters can be overridden via command line.
 
 Nathaniel Potter, 03-10-2026
 """
 
 import argparse
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
 
+import numpy as np
+
+import hand_indexer
+from river_clusterer import assign_labels_streaming, sort_centroids_by_ehs, train_centroids
+
+# ---------------------------------------------------------------------------
+# Fixed output paths
+# ---------------------------------------------------------------------------
+
+OUTPUT_DIR     = Path("output")
+INDICES_PATH   = OUTPUT_DIR / "river_sample_indices.bin"
+SAMPLE_PATH    = OUTPUT_DIR / "river_sample.npy"
+CENTROIDS_PATH = OUTPUT_DIR / "river_centroids.npy"
+LABELS_PATH    = OUTPUT_DIR / "river_labels.bin"
+
+NUM_RIVER_STATES = 2_428_287_420
+
 
 class ClusterPipeline:
-    """Orchestrates the clustering pipeline."""
+    """Orchestrates the river clustering pipeline."""
 
-    def __init__(self, build_dir: str, output_dir: str,
-                 expander: str, k: int, sample_size: int, niter: int,
+    def __init__(self, k: int, sample_size: int, niter: int,
                  seed: int, threads: int, gpu: bool, verbose: bool = True):
-        self.build_dir = Path(build_dir)
-        self.output_dir = Path(output_dir)
-        self.expander_name = expander
-        self.k = k
+        self.k           = k
         self.sample_size = sample_size
-        self.niter = niter
-        self.seed = seed
-        self.threads = threads
-        self.gpu = gpu
-        self.verbose = verbose
-
-        # Ensure directories exist
-        self.build_dir.mkdir(parents=True, exist_ok=True)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Derive paths
-        self.expander_path = self.build_dir / expander
-        self.indices_path = self.output_dir / "sample_indices.bin"
-        self.sample_path = self.output_dir / "river_sample.npy"
-        self.centroids_path = self.output_dir / "river_centroids.npy"
-        self.labels_path = self.output_dir / "river_labels.bin"
+        self.niter       = niter
+        self.seed        = seed
+        self.threads     = threads
+        self.gpu         = gpu
+        self.verbose     = verbose
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     def log(self, msg: str):
-        """Print timestamped log message."""
         if self.verbose:
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[{timestamp}] {msg}", file=sys.stderr)
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", file=sys.stderr)
 
-    def run_command(self, cmd: list[str], env: dict = None) -> subprocess.CompletedProcess:
-        """Run a shell command with optional environment."""
-        full_env = os.environ.copy()
-        if env:
-            full_env.update(env)
+    def _set_thread_env(self):
+        for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+            os.environ[var] = str(self.threads)
 
-        try:
-            result = subprocess.run(
-                cmd,
-                env=full_env,
-                check=True,
-            )
-            return result
-        except subprocess.CalledProcessError as e:
-            self.log(f"ERROR: Command failed with exit code {e.returncode}")
-            sys.exit(1)
-
-    def pipe_commands(self, cmd1: list[str], cmd2: list[str], env: dict = None):
-        """Run cmd1 | cmd2 with piped communication."""
-        full_env = os.environ.copy()
-        if env:
-            full_env.update(env)
-
-        try:
-            proc1 = subprocess.Popen(
-                cmd1,
-                env=full_env,
-                stdout=subprocess.PIPE,
-                stderr=sys.stderr,
-            )
-
-            proc2 = subprocess.Popen(
-                cmd2,
-                stdin=proc1.stdout,
-                env=full_env,
-                stderr=sys.stderr,
-            )
-
-            proc1.stdout.close()
-            proc1.wait()
-            proc2.wait()
-
-            if proc1.returncode != 0 or proc2.returncode != 0:
-                self.log(f"ERROR: Pipeline failed (exit codes: {proc1.returncode}, {proc2.returncode})")
-                sys.exit(1)
-        except Exception as e:
-            self.log(f"ERROR: {e}")
-            sys.exit(1)
-
-    def step_build_expander(self):
-        """Step 0: Build C++ expander if not already built."""
-        if self.expander_path.exists():
-            self.log(f"Expander already exists, skipping build.")
-            return
-
-        self.log(f"==> Step 0: Building {self.expander_name}...")
-        self.run_command(["make"])
-        self.log(f"Build complete.")
+    # ------------------------------------------------------------------
+    # Pipeline steps
+    # ------------------------------------------------------------------
 
     def step_generate_indices(self):
-        """Step 1a: Generate random sample indices."""
-        if self.indices_path.exists():
-            self.log(f"Indices already exist, skipping generation.")
+        """Generate sorted random sample indices and save to disk."""
+        if INDICES_PATH.exists():
+            self.log("Indices already exist, skipping generation.")
             return
 
-        self.log(f"==> Step 1/5: Generating {self.sample_size:,} random indices...")
-        script = Path(__file__).parent / "generate_sample_indices.py"
-        self.run_command([
-            sys.executable, str(script),
-            "-n", str(self.sample_size),
-            "--seed", str(self.seed),
-            "-o", str(self.indices_path),
-        ])
-        self.log(f"✓ Indices generated.")
+        self.log(f"==> Step 1/4: Sampling {self.sample_size:,} indices...")
+        t0 = time.time()
+        rng = np.random.default_rng(self.seed)
+        indices = np.sort(
+            rng.choice(NUM_RIVER_STATES, size=self.sample_size, replace=False)
+        ).astype(np.uint64)
+        indices.tofile(INDICES_PATH)
+        self.log(f"  {self.sample_size:,} indices written "
+                 f"({INDICES_PATH.stat().st_size / 1e6:.1f} MB, "
+                 f"{time.time() - t0:.1f}s)")
 
     def step_compute_sample(self):
-        """Step 1b: Compute equity vectors for sampled indices."""
-        if self.sample_path.exists():
-            self.log(f"Sample already exists, skipping computation.")
+        """Compute equity vectors for the sampled indices via pybind."""
+        if SAMPLE_PATH.exists():
+            self.log("Sample already exists, skipping computation.")
             return
 
-        self.log(f"==> Step 2/5: Computing equity vectors for {self.sample_size:,} samples...")
-
-        thread_env = {
-            "OMP_NUM_THREADS": str(self.threads),
-            "MKL_NUM_THREADS": str(self.threads),
-            "OPENBLAS_NUM_THREADS": str(self.threads),
-        }
-
-        pipe_script = Path(__file__).parent / "pipe_to_npy.py"
-        expander_cmd = [str(self.expander_path), "--sample", str(self.indices_path), "-"]
-        pipe_cmd = [sys.executable, str(pipe_script), "-o", str(self.sample_path)]
-
-        self.pipe_commands(expander_cmd, pipe_cmd, env=thread_env)
-        self.log(f"✓ Sample computed.")
+        self.log(f"==> Step 2/4: Computing equity vectors for "
+                 f"{self.sample_size:,} samples...")
+        self._set_thread_env()
+        expander = hand_indexer.RiverExpander()
+        indices = np.fromfile(INDICES_PATH, dtype=np.uint64)
+        t0 = time.time()
+        sample = expander.compute_sample(indices).astype(np.float32)
+        np.save(SAMPLE_PATH, sample)
+        self.log(f"  Sample: {sample.shape[0]:,} x {sample.shape[1]}  "
+                 f"({sample.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)")
 
     def step_train_centroids(self):
-        """Step 2: Train K-means centroids on the sample."""
-        if self.centroids_path.exists():
-            self.log(f"Centroids already exist, skipping training.")
+        """Train K-means centroids on the saved sample."""
+        if CENTROIDS_PATH.exists():
+            self.log("Centroids already exist, skipping training.")
             return
 
-        self.log(f"==> Step 3/5: Training K={self.k:,} centroids ({self.niter} iterations)...")
-
-        thread_env = {
-            "OMP_NUM_THREADS": str(self.threads),
-            "MKL_NUM_THREADS": str(self.threads),
-            "OPENBLAS_NUM_THREADS": str(self.threads),
-        }
-
-        script = Path(__file__).parent / "river_clusterer.py"
-        cmd = [
-            sys.executable, str(script),
-            "--train-only", str(self.sample_path),
-            "-k", str(self.k),
-            "-i", str(self.niter),
-            "--seed", str(self.seed),
-            "-o", str(self.output_dir / "river"),
-        ]
-        if self.gpu:
-            cmd.append("--gpu")
-
-        self.run_command(cmd, env=thread_env)
-        self.log(f"✓ Centroids trained.")
+        self.log(f"==> Step 3/4: Training K={self.k:,} centroids "
+                 f"({self.niter} iterations)...")
+        sample = np.load(SAMPLE_PATH)
+        centroids = train_centroids(sample, self.k, self.niter, self.seed, self.gpu)
+        centroids = sort_centroids_by_ehs(centroids)
+        np.save(CENTROIDS_PATH, centroids)
+        self.log(f"  Centroids saved: {CENTROIDS_PATH}")
 
     def step_assign_labels(self):
-        """Step 3: Stream all states and assign cluster labels."""
-        if self.labels_path.exists():
-            self.log(f"Labels already exist, skipping assignment.")
+        """Stream all states and assign cluster labels."""
+        if LABELS_PATH.exists():
+            self.log("Labels already exist, skipping assignment.")
             return
 
-        self.log(f"==> Step 4/5: Assigning labels to all states...")
-
-        thread_env = {
-            "OMP_NUM_THREADS": str(self.threads),
-            "MKL_NUM_THREADS": str(self.threads),
-            "OPENBLAS_NUM_THREADS": str(self.threads),
-        }
-
-        script = Path(__file__).parent / "river_clusterer.py"
-        expander_cmd = [str(self.expander_path), "--quiet", "-"]
-        clusterer_cmd = [
-            sys.executable, str(script),
-            "--assign-only", str(self.centroids_path),
-            "--stdin",
-            "-o", str(self.output_dir / "river"),
-        ]
-        if self.gpu:
-            clusterer_cmd.append("--gpu")
-
-        self.pipe_commands(expander_cmd, clusterer_cmd, env=thread_env)
-        self.log(f"✓ Labels assigned.")
+        self.log("==> Step 4/4: Assigning labels to all states...")
+        self._set_thread_env()
+        expander  = hand_indexer.RiverExpander()
+        centroids = np.load(CENTROIDS_PATH)
+        assign_labels_streaming(expander, centroids, str(LABELS_PATH),
+                                batch_size=1_000_000, gpu=self.gpu)
+        self.log(f"  Labels saved: {LABELS_PATH}")
 
     def run(self):
         """Execute the full pipeline."""
-        start_time = time.time()
-        self.log(f"Starting clustering pipeline")
+        start = time.time()
+        self.log(f"Starting river clustering pipeline")
         self.log(f"Parameters: K={self.k:,}, sample_size={self.sample_size:,}, "
                  f"niter={self.niter}, threads={self.threads}, gpu={self.gpu}")
 
-        try:
-            self.step_build_expander()
-            self.step_generate_indices()
-            self.step_compute_sample()
-            self.step_train_centroids()
-            self.step_assign_labels()
+        self.step_generate_indices()
+        self.step_compute_sample()
+        self.step_train_centroids()
+        self.step_assign_labels()
 
-            elapsed = time.time() - start_time
-            self.log(f"==> Pipeline complete in {elapsed / 60:.1f} minutes")
-            self.log(f"Centroids: {self.centroids_path}")
-            self.log(f"Labels:    {self.labels_path}")
-            self.log(f"(You can delete {self.sample_path} and {self.indices_path} to reclaim space)")
-        except Exception as e:
-            self.log(f"FATAL: {e}")
-            sys.exit(1)
+        elapsed = time.time() - start
+        self.log(f"==> Pipeline complete in {elapsed / 60:.1f} minutes")
+        self.log(f"Centroids: {CENTROIDS_PATH}")
+        self.log(f"Labels:    {LABELS_PATH}")
+        self.log(f"(You can delete {SAMPLE_PATH} and {INDICES_PATH} to reclaim space)")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Unified K-means clustering pipeline.",
+        description="K-means clustering pipeline for river equity states.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -248,54 +160,24 @@ Examples:
   python cluster_pipeline.py --gpu -t 8
         """,
     )
-
-    parser.add_argument(
-        "-e", "--expander", default="river_expander",
-        help="Name of C++ expander executable in build/ (default: river_expander)",
-    )
-    parser.add_argument(
-        "-k", "--clusters", type=int, default=30_000,
-        help="Number of clusters (default: 30000)",
-    )
-    parser.add_argument(
-        "-s", "--sample-size", type=int, default=20_000_000,
-        help="Training sample size (default: 20000000)",
-    )
-    parser.add_argument(
-        "-i", "--niter", type=int, default=25,
-        help="K-means iterations (default: 25)",
-    )
-    parser.add_argument(
-        "--seed", type=int, default=42,
-        help="Random seed (default: 42)",
-    )
-    parser.add_argument(
-        "-t", "--threads", type=int, default=16,
-        help="CPU thread limit (default: 16)",
-    )
-    parser.add_argument(
-        "--gpu", action="store_true",
-        help="Use GPU for K-means training",
-    )
-    parser.add_argument(
-        "-b", "--build-dir", default="build",
-        help="Build directory for C++ binaries (default: build/)",
-    )
-    parser.add_argument(
-        "-o", "--output-dir", default="output",
-        help="Output directory for results (default: output/)",
-    )
-    parser.add_argument(
-        "-q", "--quiet", action="store_true",
-        help="Suppress status messages",
-    )
+    parser.add_argument("-k", "--clusters", type=int, default=30_000,
+                        help="Number of clusters (default: 30000)")
+    parser.add_argument("-s", "--sample-size", type=int, default=20_000_000,
+                        help="Training sample size (default: 20000000)")
+    parser.add_argument("-i", "--niter", type=int, default=25,
+                        help="K-means iterations (default: 25)")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed (default: 42)")
+    parser.add_argument("-t", "--threads", type=int, default=16,
+                        help="OMP thread count (default: 16)")
+    parser.add_argument("--gpu", action="store_true",
+                        help="Use GPU for K-means training")
+    parser.add_argument("-q", "--quiet", action="store_true",
+                        help="Suppress status messages")
 
     args = parser.parse_args()
 
-    pipeline = ClusterPipeline(
-        build_dir=args.build_dir,
-        output_dir=args.output_dir,
-        expander=args.expander,
+    ClusterPipeline(
         k=args.clusters,
         sample_size=args.sample_size,
         niter=args.niter,
@@ -303,9 +185,7 @@ Examples:
         threads=args.threads,
         gpu=args.gpu,
         verbose=not args.quiet,
-    )
-
-    pipeline.run()
+    ).run()
 
 
 if __name__ == "__main__":
