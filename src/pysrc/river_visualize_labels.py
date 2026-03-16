@@ -6,7 +6,6 @@ optionally river_centroids.npy (K×169 float32) to produce a 2×3
 diagnostic figure plus console summary statistics.
 """
 
-import argparse
 import os
 import sys
 
@@ -16,19 +15,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
-# ── CLI ──────────────────────────────────────────────────────────────
-def parse_args():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--labels", default=os.path.join(
-        os.path.dirname(__file__), "..", "output", "river_labels.bin"),
-        help="Path to river_labels.bin (uint16 binary)")
-    p.add_argument("--centroids", default=None,
-        help="Path to river_centroids.npy (optional, auto-detected)")
-    p.add_argument("-k", type=int, default=8192,
-        help="Number of clusters (default: 8192)")
-    p.add_argument("-o", "--output", default=None,
-        help="Output PNG path (default: <labels_dir>/river_labels_viz.png)")
-    return p.parse_args()
+# ── Paths ─────────────────────────────────────────────────────────────
+OUTPUT_DIR      = os.path.join(os.path.dirname(__file__), "..", "output")
+LABELS_PATH     = os.path.join(OUTPUT_DIR, "river_labels.bin")
+CENTROIDS_PATH  = os.path.join(OUTPUT_DIR, "river_centroids.npy")
+OUTPUT_PATH     = os.path.join(OUTPUT_DIR, "river_labels_viz.png")
+K               = 8192
 
 
 # ── Data loading ─────────────────────────────────────────────────────
@@ -445,22 +437,13 @@ def plot_hands(counts, mean_ehs, output_path, hand_examples):
 
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
-    args = parse_args()
+    labels_path     = os.path.abspath(LABELS_PATH)
+    centroids_path  = os.path.abspath(CENTROIDS_PATH)
+    output_path     = os.path.abspath(OUTPUT_PATH)
+    k               = K
 
-    # Resolve paths
-    labels_path = os.path.abspath(args.labels)
     if not os.path.isfile(labels_path):
         sys.exit(f"Error: labels file not found: {labels_path}")
-
-    centroids_path = args.centroids
-    if centroids_path is None:
-        # Auto-detect next to labels
-        centroids_path = os.path.join(os.path.dirname(labels_path), "river_centroids.npy")
-
-    output_path = args.output or os.path.join(
-        os.path.dirname(labels_path), "river_labels_viz.png")
-
-    k = args.k
 
     # Load centroids first so we know which clusters to sample examples for
     centroids = load_centroids(centroids_path)

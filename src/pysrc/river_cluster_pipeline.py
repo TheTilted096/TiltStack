@@ -8,12 +8,14 @@ Orchestrates the full K-means clustering workflow:
   3. Train K-means centroids on the sample
   4. Stream all states and assign cluster labels
 
+GPU (FAISS) is required — CPU clustering is not supported.
+
 Requires the hand_indexer pybind module to be built first:
     cd src/ && make
 
 Then run:
     python river_cluster_pipeline.py
-    python river_cluster_pipeline.py -k 8192 --sample-size 20000000 -t 16 --gpu
+    python river_cluster_pipeline.py -k 8192 --sample-size 20000000 -t 16
 
 Nathaniel Potter, 03-10-2026
 """
@@ -27,7 +29,8 @@ from pathlib import Path
 import numpy as np
 
 import hand_indexer
-from river_clusterer import assign_labels_streaming, sort_centroids_by_ehs, train_centroids
+from river_clusterer import (assign_labels_streaming, gpu_available,
+                              sort_centroids_by_ehs, train_centroids)
 
 # ---------------------------------------------------------------------------
 # Fixed output paths
@@ -46,13 +49,12 @@ class ClusterPipeline:
     """Orchestrates the river clustering pipeline."""
 
     def __init__(self, k: int, sample_size: int, niter: int,
-                 seed: int, threads: int, gpu: bool, verbose: bool = True):
+                 seed: int, threads: int, verbose: bool = True):
         self.k           = k
         self.sample_size = sample_size
         self.niter       = niter
         self.seed        = seed
         self.threads     = threads
-        self.gpu         = gpu
         self.verbose     = verbose
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -111,7 +113,7 @@ class ClusterPipeline:
         self.log(f"==> Step 3/4: Training K={self.k:,} centroids "
                  f"({self.niter} iterations)...")
         sample = np.load(SAMPLE_PATH)
-        centroids = train_centroids(sample, self.k, self.niter, self.seed, self.gpu)
+        centroids = train_centroids(sample, self.k, self.niter, self.seed)
         centroids = sort_centroids_by_ehs(centroids)
         np.save(CENTROIDS_PATH, centroids)
         self.log(f"  Centroids saved: {CENTROIDS_PATH}")
@@ -127,37 +129,43 @@ class ClusterPipeline:
         expander  = hand_indexer.RiverExpander()
         centroids = np.load(CENTROIDS_PATH)
         assign_labels_streaming(expander, centroids, str(LABELS_PATH),
-                                batch_size=1_000_000, gpu=self.gpu)
+                                batch_size=1_000_000)
         self.log(f"  Labels saved: {LABELS_PATH}")
 
     def run(self):
         """Execute the full pipeline."""
+        if not gpu_available():
+            sys.exit("Error: No FAISS GPU support detected. A GPU is required to run this pipeline.")
         start = time.time()
         self.log(f"Starting river clustering pipeline")
         self.log(f"Parameters: K={self.k:,}, sample_size={self.sample_size:,}, "
-                 f"niter={self.niter}, threads={self.threads}, gpu={self.gpu}")
+                 f"niter={self.niter}, threads={self.threads}")
 
         self.step_generate_indices()
         self.step_compute_sample()
         self.step_train_centroids()
         self.step_assign_labels()
 
+        self.log("  Cleaning up intermediate sample files...")
+        for path in (SAMPLE_PATH, INDICES_PATH):
+            if path.exists():
+                path.unlink()
+                self.log(f"  Deleted: {path}")
+
         elapsed = time.time() - start
         self.log(f"==> Pipeline complete in {elapsed / 60:.1f} minutes")
         self.log(f"Centroids: {CENTROIDS_PATH}")
         self.log(f"Labels:    {LABELS_PATH}")
-        self.log(f"(You can delete {SAMPLE_PATH} and {INDICES_PATH} to reclaim space)")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="K-means clustering pipeline for river equity states.",
+        description="K-means clustering pipeline for river equity states (GPU required).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python river_cluster_pipeline.py
   python river_cluster_pipeline.py -k 8192 --sample-size 20000000 -t 16
-  python river_cluster_pipeline.py --gpu -t 8
         """,
     )
     parser.add_argument("-k", "--clusters", type=int, default=8_192,
@@ -170,8 +178,6 @@ Examples:
                         help="Random seed (default: 42)")
     parser.add_argument("-t", "--threads", type=int, default=16,
                         help="OMP thread count (default: 16)")
-    parser.add_argument("--gpu", action="store_true",
-                        help="Use GPU for K-means training")
     parser.add_argument("-q", "--quiet", action="store_true",
                         help="Suppress status messages")
 
@@ -183,7 +189,6 @@ Examples:
         niter=args.niter,
         seed=args.seed,
         threads=args.threads,
-        gpu=args.gpu,
         verbose=not args.quiet,
     ).run()
 

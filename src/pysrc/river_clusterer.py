@@ -2,9 +2,12 @@
 K-means clustering for river equity vectors.
 
 Library functions used by river_cluster_pipeline.py:
-  train_centroids(sample, k, niter, seed, gpu)  -> np.ndarray  (K, 169) float32
-  sort_centroids_by_ehs(centroids)              -> np.ndarray  sorted copy
-  assign_labels_streaming(expander, centroids, out_path, batch_size, gpu)
+  train_centroids(sample, k, niter, seed)  -> np.ndarray  (K, 169) float32
+  sort_centroids_by_ehs(centroids)         -> np.ndarray  sorted copy
+  assign_labels_streaming(expander, centroids, out_path, batch_size)
+
+GPU (FAISS) is required — CPU clustering is not supported due to infeasible
+runtime on the ~2.4B river states dataset.
 
 Nathaniel Potter, 03-08-2026
 """
@@ -30,42 +33,28 @@ def gpu_available() -> bool:
         return False
 
 
-def make_gpu_index(index: faiss.Index) -> faiss.Index:
-    """Move a FAISS index to GPU if possible, otherwise return the CPU index."""
-    if not gpu_available():
-        return index
-    res = faiss.StandardGpuResources()
-    return faiss.index_cpu_to_gpu(res, 0, index)
-
-
 def train_centroids(sample: np.ndarray, k: int, niter: int,
-                    seed: int, gpu: bool) -> np.ndarray:
-    """Train K-means centroids using FAISS.
+                    seed: int) -> np.ndarray:
+    """Train K-means centroids using FAISS on GPU.
 
     Args:
         sample:  (N, D) float32 training vectors.
         k:       Number of clusters.
         niter:   K-means iterations.
         seed:    Random seed.
-        gpu:     Use GPU if available.
 
     Returns:
         (k, D) float32 centroid matrix.
     """
     d = sample.shape[1]
-    use_gpu = gpu and gpu_available()
-    if gpu and not use_gpu:
-        print("WARNING: --gpu requested but no FAISS GPU support found; "
-              "falling back to CPU.", file=sys.stderr)
-    backend = "GPU" if use_gpu else "CPU"
-    print(f"Training K={k:,} centroids, {niter} iterations on {backend} "
+    print(f"Training K={k:,} centroids, {niter} iterations on GPU "
           f"({sample.shape[0]:,} x {d} vectors)...", file=sys.stderr)
     kmeans = faiss.Kmeans(
         d, k,
         niter=niter,
         verbose=True,
         seed=seed,
-        gpu=use_gpu,
+        gpu=True,
         max_points_per_centroid=sample.shape[0] // k + 1,
     )
     t0 = time.time()
@@ -81,7 +70,7 @@ def sort_centroids_by_ehs(centroids: np.ndarray) -> np.ndarray:
 
 
 def assign_labels_streaming(expander, centroids: np.ndarray, out_path: str,
-                             batch_size: int = 1_000_000, gpu: bool = False) -> None:
+                             batch_size: int = 1_000_000) -> None:
     """Assign cluster labels to all states via a pybind expander.
 
     Streams equity vectors in batches via expander.expand_all() to avoid
@@ -91,14 +80,13 @@ def assign_labels_streaming(expander, centroids: np.ndarray, out_path: str,
     k, d = centroids.shape
     assert k <= 65535, "K must fit in uint16"
 
-    index = faiss.IndexFlatL2(d)
-    index.add(centroids)
-    if gpu:
-        index = make_gpu_index(index)
+    cpu_index = faiss.IndexFlatL2(d)
+    cpu_index.add(centroids)
+    res   = faiss.StandardGpuResources()
+    index = faiss.index_cpu_to_gpu(res, 0, cpu_index)
 
     total_states = expander.num_states()
-    backend = "GPU" if gpu and gpu_available() else "CPU"
-    print(f"Assigning {total_states:,} vectors on {backend} "
+    print(f"Assigning {total_states:,} vectors on GPU "
           f"(batch_size={batch_size:,})...", file=sys.stderr)
     t0 = time.time()
     total_assigned = 0

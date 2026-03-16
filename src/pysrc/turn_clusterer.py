@@ -2,10 +2,25 @@
 K-means clustering for turn wide-bucket histogram vectors.
 
 Library functions used by turn_cluster_pipeline.py:
-  train_turn_centroids(sample, k, niter, seed, gpu)  -> np.ndarray  (K, 256) float32
-  compute_wide_ehs(river_centroids)                  -> np.ndarray  (256,) float32
-  sort_turn_centroids(centroids, wide_ehs)            -> np.ndarray  sorted copy
-  assign_turn_labels_streaming(expander, centroids, out_path, batch_size, gpu)
+  train_turn_centroids(sample, k, niter, seed)  -> np.ndarray  (K, 256) float32
+  compute_wide_ehs(river_centroids)              -> np.ndarray  (256,) float32
+  sort_turn_centroids(centroids, wide_ehs)       -> np.ndarray  sorted copy
+  assign_turn_labels_streaming(expander, centroids, out_path, batch_size)
+
+Each turn state is represented as a 256-dim float32 CDF vector:
+  - The C++ TurnExpander produces a uint8[256] count histogram over 256 wide
+    buckets (each wide bucket spans 32 consecutive river fine buckets).
+  - Counts sum to 46 (one per possible river card).
+  - The CDF is the cumulative sum of these counts (NOT divided by 46), yielding
+    values in [0, 46].
+  - L1 distance between CDFs equals the Earth Mover's Distance (Wasserstein-1)
+    on the underlying probability distributions, making clustering more sensitive
+    to distributional ordering than L1 on raw PDFs.
+  - Centroids are sorted by expected EHS computed via PDF (finite differences of
+    the CDF) dot-producted with wide bucket EHS values from river_centroids.npy.
+
+GPU (FAISS) is required — CPU clustering is not supported due to infeasible
+runtime on the ~55M turn states dataset.
 
 Nathaniel Potter, 03-15-2026
 """
@@ -16,7 +31,7 @@ import time
 import faiss
 import numpy as np
 
-# Normalisation denominator: one histogram count per possible river card.
+# Number of possible river cards per turn state (counts sum to this value).
 RIVER_CARDS_PER_TURN = 46
 
 
@@ -33,26 +48,24 @@ def gpu_available() -> bool:
 
 
 def train_turn_centroids(sample: np.ndarray, k: int, niter: int,
-                         seed: int, gpu: bool) -> np.ndarray:
-    """Train K-means centroids on float32 probability vectors with L1 distance.
+                         seed: int) -> np.ndarray:
+    """Train K-means centroids on float32 CDF vectors with L1 distance on GPU.
+
+    L1 distance between CDFs is equivalent to the Earth Mover's Distance
+    (Wasserstein-1) on the underlying probability distributions.
 
     Args:
-        sample:  (N, 256) float32 probability vectors (counts / 46.0).
+        sample:  (N, 256) float32 CDF vectors (cumsum of counts, NOT divided by
+                 46.0, so values range from 0 to 46).
         k:       Number of clusters.
         niter:   K-means iterations.
         seed:    Random seed.
-        gpu:     Use GPU if available.
 
     Returns:
-        (k, 256) float32 centroid matrix.
+        (k, 256) float32 centroid matrix (CDF vectors, values in [0, 46]).
     """
     d = sample.shape[1]
-    use_gpu = gpu and gpu_available()
-    if gpu and not use_gpu:
-        print("WARNING: --gpu requested but no FAISS GPU support found; "
-              "falling back to CPU.", file=sys.stderr)
-    backend = "GPU" if use_gpu else "CPU"
-    print(f"Training K={k:,} turn centroids, {niter} iterations on {backend} "
+    print(f"Training K={k:,} turn centroids, {niter} iterations on GPU "
           f"({sample.shape[0]:,} x {d} vectors, L1)...", file=sys.stderr)
 
     clus = faiss.Clustering(d, k)
@@ -61,10 +74,9 @@ def train_turn_centroids(sample: np.ndarray, k: int, niter: int,
     clus.seed    = seed
     clus.max_points_per_centroid = sample.shape[0] // k + 1
 
-    index = faiss.IndexFlat(d, faiss.METRIC_L1)
-    if use_gpu:
-        res   = faiss.StandardGpuResources()
-        index = faiss.index_cpu_to_gpu(res, 0, index)
+    cpu_index = faiss.IndexFlat(d, faiss.METRIC_L1)
+    res       = faiss.StandardGpuResources()
+    index     = faiss.index_cpu_to_gpu(res, 0, cpu_index)
 
     t0 = time.time()
     clus.train(sample, index)
@@ -93,38 +105,43 @@ def compute_wide_ehs(river_centroids: np.ndarray) -> np.ndarray:
 def sort_turn_centroids(centroids: np.ndarray, wide_ehs: np.ndarray) -> np.ndarray:
     """Return centroids sorted by expected EHS (ascending = weakest first).
 
-    E[EHS] = sum_i( wide_ehs[i] * prob[i] ) = centroids @ wide_ehs
+    Centroids are CDF vectors; we revert to PDF via finite differences before
+    computing E[EHS] so the dot product yields a true probability-weighted sum.
+
+    E[EHS] = sum_i( pdf[i] * wide_ehs[i] )   where pdf = diff(cdf)
 
     Args:
-        centroids: (K, 256) float32 turn centroid matrix (probability vectors).
+        centroids: (K, 256) float32 turn centroid matrix (CDF vectors, values
+                   in [0, 46], NOT divided by 46.0).
         wide_ehs:  (256,) float32 average EHS per wide bucket from compute_wide_ehs().
 
     Returns:
         Sorted copy of centroids with label 0 = lowest expected EHS (weakest).
     """
-    expected_ehs = centroids @ wide_ehs    # (K,) scalar EHS per centroid
+    # Convert CDF → PDF (differences; first bucket equals first CDF value)
+    pdf = np.hstack([centroids[:, :1], np.diff(centroids, axis=1)])  # (K, 256)
+    expected_ehs = pdf @ wide_ehs    # (K,) – proportional to E[EHS], sufficient for ordering
     return centroids[np.argsort(expected_ehs)]
 
 
 def assign_turn_labels_streaming(expander, centroids: np.ndarray, out_path: str,
-                                 batch_size: int = 500_000, gpu: bool = False) -> None:
-    """Assign turn cluster labels to all states via the TurnExpander.
+                                 batch_size: int = 500_000) -> None:
+    """Assign turn cluster labels to all states via the TurnExpander on GPU.
 
-    Normalises each uint8 batch by 46.0, then searches with L1 distance.
+    Converts each uint8 count batch to a CDF (cumsum, NOT divided by 46),
+    then searches with L1 distance (equivalent to Earth Mover's Distance).
     Writes raw uint16 labels to out_path.
     """
     k, d = centroids.shape
     assert k <= 65535, "K must fit in uint16"
 
-    index = faiss.IndexFlat(d, faiss.METRIC_L1)
-    index.add(centroids)
-    if gpu and gpu_available():
-        res   = faiss.StandardGpuResources()
-        index = faiss.index_cpu_to_gpu(res, 0, index)
+    cpu_index = faiss.IndexFlat(d, faiss.METRIC_L1)
+    cpu_index.add(centroids)
+    res   = faiss.StandardGpuResources()
+    index = faiss.index_cpu_to_gpu(res, 0, cpu_index)
 
     total_states = expander.num_states()
-    backend = "GPU" if gpu and gpu_available() else "CPU"
-    print(f"Assigning {total_states:,} turn vectors on {backend} "
+    print(f"Assigning {total_states:,} turn vectors on GPU "
           f"(batch_size={batch_size:,})...", file=sys.stderr)
     t0 = time.time()
     total_assigned = 0
@@ -132,7 +149,7 @@ def assign_turn_labels_streaming(expander, centroids: np.ndarray, out_path: str,
     with open(out_path, 'wb') as f:
         def process_batch(batch_uint8):
             nonlocal total_assigned
-            batch = batch_uint8.astype(np.float32) / RIVER_CARDS_PER_TURN
+            batch = np.cumsum(batch_uint8.astype(np.float32), axis=1)
             _, labels = index.search(batch, 1)
             f.write(labels.ravel().astype(np.uint16).tobytes())
             total_assigned += len(batch)

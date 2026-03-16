@@ -2,15 +2,16 @@
 """Visualize turn bucket label distribution and centroid structure.
 
 Reads the binary turn_labels.bin (55M uint16 cluster labels) and
-optionally turn_centroids.npy (K×256 float32) to produce diagnostic
+optionally turn_centroids.npy (Kx256 float32) to produce diagnostic
 figures plus console summary statistics.
 
-Turn centroids are 256-dim probability vectors over wide river buckets.
-Expected EHS is computed as centroids @ wide_ehs, where wide_ehs is
+Turn centroids are 256-dim CDF vectors over wide river buckets (raw counts,
+NOT divided by 46.0, so values range from 0 to 46).  Expected EHS is computed
+by converting each CDF centroid back to a PDF via finite differences, then
+computing (pdf @ wide_ehs) / (46.0 * 255.0), where wide_ehs (0-255 scale) is
 derived from river_centroids.npy.
 """
 
-import argparse
 import os
 import sys
 
@@ -19,21 +20,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# ── CLI ──────────────────────────────────────────────────────────────
-def parse_args():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--labels", default=os.path.join(
-        os.path.dirname(__file__), "..", "output", "turn_labels.bin"),
-        help="Path to turn_labels.bin (uint16 binary)")
-    p.add_argument("--centroids", default=None,
-        help="Path to turn_centroids.npy (optional, auto-detected)")
-    p.add_argument("--river-centroids", default=None,
-        help="Path to river_centroids.npy (optional, auto-detected)")
-    p.add_argument("-k", type=int, default=8192,
-        help="Number of clusters (default: 8192)")
-    p.add_argument("-o", "--output", default=None,
-        help="Output PNG path (default: <labels_dir>/turn_labels_viz.png)")
-    return p.parse_args()
+# ── Paths ─────────────────────────────────────────────────────────────
+OUTPUT_DIR           = os.path.join(os.path.dirname(__file__), "..", "output")
+LABELS_PATH          = os.path.join(OUTPUT_DIR, "turn_labels.bin")
+CENTROIDS_PATH       = os.path.join(OUTPUT_DIR, "turn_centroids.npy")
+RIVER_CENTROIDS_PATH = os.path.join(OUTPUT_DIR, "river_centroids.npy")
+OUTPUT_PATH          = os.path.join(OUTPUT_DIR, "turn_labels_viz.png")
+K                    = 8192
 
 
 # ── Data loading ─────────────────────────────────────────────────────
@@ -218,12 +211,19 @@ def plot_cluster_sizes(axes, counts, n):
 
 
 def compute_centroid_features(centroids, wide_ehs):
-    """Pre-compute shared features: E[EHS], PCA projection, variance explained."""
-    expected_ehs = (centroids @ wide_ehs) / 255.0   # (K,) in [0, 1]
+    """Pre-compute shared features: E[EHS], PCA projection, variance explained.
+
+    centroids are CDF vectors (raw counts, NOT divided by 46).  We revert to
+    PDF via finite differences, then scale by 46 * 255 to obtain true equity
+    in [0, 1].
+    """
+    # CDF → PDF (first bucket = first CDF value; remaining = consecutive diffs)
+    pdf = np.hstack([centroids[:, :1], np.diff(centroids, axis=1)])  # (K, 256)
+    expected_ehs = (pdf @ wide_ehs) / (46.0 * 255.0)                 # (K,) in [0, 1]
     mean_vec = centroids.mean(axis=0)
     centered = centroids - mean_vec
     U, S, Vt = np.linalg.svd(centered, full_matrices=False)
-    proj = centered @ Vt[:2].T                       # (K, 2)
+    proj = centered @ Vt[:2].T                                        # (K, 2)
     var_explained = S[:2] ** 2 / np.sum(S ** 2) * 100
     return expected_ehs, proj, var_explained
 
@@ -389,20 +389,14 @@ def plot_hands(counts, expected_ehs, output_path, hand_examples):
 
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
-    args = parse_args()
+    labels_path          = os.path.abspath(LABELS_PATH)
+    centroids_path       = os.path.abspath(CENTROIDS_PATH)
+    river_centroids_path = os.path.abspath(RIVER_CENTROIDS_PATH)
+    output_path          = os.path.abspath(OUTPUT_PATH)
+    k                    = K
 
-    labels_path = os.path.abspath(args.labels)
     if not os.path.isfile(labels_path):
         sys.exit(f"Error: labels file not found: {labels_path}")
-
-    labels_dir = os.path.dirname(labels_path)
-
-    centroids_path = args.centroids or os.path.join(labels_dir, "turn_centroids.npy")
-    river_centroids_path = args.river_centroids or os.path.join(labels_dir, "river_centroids.npy")
-
-    output_path = args.output or os.path.join(labels_dir, "turn_labels_viz.png")
-
-    k = args.k
 
     # Load centroids
     centroids = load_centroids(centroids_path)

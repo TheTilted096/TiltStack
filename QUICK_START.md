@@ -3,67 +3,53 @@
 ## Prerequisites
 
 - **Python 3.8+**
-- **C++ compiler** with C++20 support (C++11 for `src/`)
+- **C++ compiler** with C++20 support
   - Windows: MSVC via [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-  - Linux/Mac: g++ or clang++ (usually pre-installed)
+  - Linux/Mac: g++ or clang++
 
-## Leduc Demo (Recommended Starting Point)
+---
 
-### Install & Run
+## Kuhn Poker Demo
+
+No build step needed — pure Python:
+
+```bash
+cd demos/kuhn
+python Kuhn.py    # Trains vanilla CFR (1000 iterations) with convergence visualization
+```
+
+---
+
+## Leduc Hold'em Demo
+
+### Install & Build
 
 ```bash
 cd demos/leduc
 make install   # Install pybind11 via pip
 make build     # Compile C++ extension → leducsolver.pyd/.so
+```
+
+### Run
+
+```bash
 make test      # Train CFR+ solver (100k iterations)
 make best      # Compute Best Response exploitability
 make clean     # Remove build artifacts and output files
 ```
 
-After building, run Python scripts directly:
+Or directly from `src/pysrc/`:
+
 ```bash
-cd demos/leduc/src/pysrc
-python Leduc.py         # Train CFR solver (100k iterations)
+python Leduc.py         # Train CFR+ (100k iterations)
 python BestResponse.py  # Compute exploitability of trained strategy
 ```
 
-**Note**: On Linux/Mac, use `python3` instead of `python`.
+### Output
 
-### Project Structure
-
-```
-demos/leduc/
-├── Makefile                # Build commands
-├── setup.py                # C++ compilation config (C++20, pybind11)
-├── requirements.txt        # Python dependencies
-├── docs/
-│   └── IMPLEMENTATION.md   # Algorithm details and design decisions
-└── src/
-    ├── cppsrc/             # C++ source
-    │   ├── Node.h/cpp           # Game tree types, regret matching
-    │   ├── Leduc.h/cpp          # CFR+ solver (alternating updates)
-    │   ├── BestResponse.h/cpp   # Exploitability computation
-    │   └── bindings.cpp         # PyBind11 wrappers
-    └── pysrc/              # Python source
-        ├── leducsolver.pyd      # Compiled module (copied after build)
-        ├── Leduc.py             # Training loop, strategy output, plotting
-        └── BestResponse.py      # Best Response computation wrapper
-```
-
-### Workflow
-
-**Training CFR Strategy:**
-1. Edit C++ solver code in `demos/leduc/src/cppsrc/` if needed
-2. Run `make build` to compile
-3. Run `make test` or `python src/pysrc/Leduc.py` to train
-4. Check `output/leduc_results.txt` for human-readable strategy
-5. Check `output/leduc_strategy.csv` for machine-readable strategy
-
-**Measuring Exploitability:**
-1. After training CFR, run `make best` or `python src/pysrc/BestResponse.py`
-2. Check `output/br_results.txt` for Best Response strategies and exploitability
-
-### Output Format
+- `output/leduc_results.txt` — human-readable strategy
+- `output/leduc_strategy.csv` — machine-readable strategy
+- `output/br_results.txt` — Best Response strategies and exploitability
 
 Strategy files use player markers `(0)` or `(1)` before each node:
 ```
@@ -71,82 +57,95 @@ Strategy files use player markers `(0)` or `(1)` before each node:
 (1) J:r          -> c:0.79, b:0.16, r:0.05
 ```
 
-## Hold'em River Clustering Pipeline
+### Project Structure
 
-### Install Dependencies
-
-```bash
-pip install -r requirements.txt   # numpy, faiss-cpu
+```
+demos/leduc/
+├── Makefile
+├── setup.py                # C++20 + pybind11 config
+├── requirements.txt
+├── docs/
+│   └── IMPLEMENTATION.md
+└── src/
+    ├── cppsrc/             # Node, Leduc (CFR+), BestResponse, bindings
+    └── pysrc/              # Leduc.py, BestResponse.py
 ```
 
-For GPU acceleration, install `faiss-gpu` instead of `faiss-cpu`.
+---
 
-### Build & Run
+## Hold'em Clustering Pipeline
+
+Clusters 2.4B river equity states and ~55M turn states into 8192 buckets each using K-means (FAISS, GPU required).
+
+### Build
 
 ```bash
 cd src
-make              # Build river_expander executable
-make pybind       # Build hand_indexer Python module
-make pipeline     # Run full 3-step clustering pipeline
-make clean        # Remove build artifacts
-make clean-hard   # Remove build/ and output/ entirely
+pip install -e . --no-build-isolation   # Compile hand_indexer pybind module
 ```
+
+Or via make:
+
+```bash
+make        # Equivalent to pip install -e . --no-build-isolation
+make clean       # Remove build artifacts
+make clean-hard  # Also remove output/
+```
+
+### Run Pipelines
+
+From `src/pysrc/`:
+
+```bash
+python pysrc/river_cluster_pipeline.py
+python pysrc/river_visualize_labels.py
+python pysrc/turn_cluster_pipeline.py
+python pysrc/turn_visualize_labels.py
+```
+
+The turn pipeline depends on `river_labels.bin` and `river_centroids.npy` — run river first.
 
 ### Pipeline Parameters
 
-Override on the command line:
 ```bash
-make pipeline K=5000 SAMPLE_SIZE=10000000 THREADS=8 GPU=no
+python pysrc/river_cluster_pipeline.py -k 8192 --sample-size 20000000 -t 16
+python pysrc/turn_cluster_pipeline.py  -k 8192 --sample-size 10000000  -t 16
 ```
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `K` | 30000 | Number of clusters |
-| `SAMPLE_SIZE` | 20000000 | Training sample size |
-| `NITER` | 25 | K-means iterations |
-| `THREADS` | 16 | CPU thread limit |
-| `GPU` | auto | GPU acceleration (`yes`/`no`/`auto`) |
+| Parameter | River default | Turn default | Description |
+|-----------|--------------|-------------|-------------|
+| `-k` | 8192 | 8192 | Number of clusters |
+| `-s` | 20,000,000 | 10,000,000 | Training sample size |
+| `-i` | 25 | 25 | K-means iterations |
+| `-t` | 16 | 16 | OMP thread count |
 
-### Pipeline Steps
+### Pipeline Steps (each pipeline)
 
-1. **Sample**: Generate random indices → compute equity vectors for sample
-2. **Train**: K-means centroids on the sample (FAISS)
-3. **Assign**: Stream all 2.4B states, assign each to nearest centroid
+1. **Generate indices** — random sample of state indices, sorted and saved
+2. **Compute sample** — equity/CDF vectors for sampled indices via C++ pybind
+3. **Train centroids** — FAISS K-means on GPU; centroids sorted by EHS
+4. **Assign labels** — stream all states, write uint16 cluster assignments
+
+Intermediate sample files (`*_sample_indices.bin`, `*_sample.npy`) are deleted automatically after the pipeline completes.
 
 ### Output Files
 
-- `output/river_centroids.npy` — K×169 float32 centroid matrix
-- `output/river_labels.bin` — 2.4B uint16 cluster assignments
-- `output/river_labels_viz*.png` — Diagnostic visualizations
-
-## Kuhn Poker Demo
-
-No build step needed — pure Python:
-```bash
-cd demos/kuhn
-python Kuhn.py    # Train vanilla CFR (1000 iterations) with convergence visualization
+```
+src/output/
+├── river_centroids.npy              # 8192 × 169 float32 centroid matrix
+├── river_labels.bin                 # 2.4B uint16 cluster assignments
+├── river_labels_viz.png             # Cluster size distribution + PCA overview
+├── river_labels_viz_representatives.png
+├── river_labels_viz_hands.png
+├── turn_centroids.npy               # 8192 × 256 float32 CDF centroid matrix
+├── turn_labels.bin                  # ~55M uint16 cluster assignments
+├── turn_labels_viz.png
+├── turn_labels_viz_representatives.png
+└── turn_labels_viz_hands.png
 ```
 
-## Adding C++ Bindings (PyBind11)
+### Technical Notes
 
-Example from Leduc (`bindings.cpp`):
-```cpp
-#include <pybind11/pybind11.h>
-#include "Leduc.cpp"
-#include "Node.cpp"
-
-namespace py = pybind11;
-
-PYBIND11_MODULE(leducsolver, m) {
-    py::class_<LeducSolver>(m, "LeducSolver")
-        .def(py::init<>())
-        .def("cfr", &LeducSolver::cfr);
-}
-```
-
-Python usage:
-```python
-from leducsolver import LeducSolver, Rank
-solver = LeducSolver()
-solver.cfr([Rank.JACK, Rank.QUEEN, Rank.KING], 0, [1.0, 1.0])
-```
+- **River**: 2,428,287,420 states; 169-dim equity vectors (one per preflop bucket); L2 K-means
+- **Turn**: ~55M states; 256-dim CDF vectors over wide buckets (32 river clusters each); L1 K-means (Earth Mover's Distance)
+- Both pipelines require FAISS with GPU support — CPU-only runs are not supported
