@@ -1,56 +1,33 @@
-# TiltStack
+# TiltStack - Adaptive Poker AI
 
-An exploitative poker AI using GTO followed by opponent modelling.
+Fast adaptation in adversarial poker environments.
 
-## Overview
+## Quick Start
+```bash
+# Install dependencies
+pip install rlcard torch matplotlib
 
-TiltStack is a poker AI project that combines Game Theory Optimal (GTO) strategy computation with opponent modeling to create an exploitative poker agent. The project uses Counterfactual Regret Minimization (CFR) to compute Nash equilibrium strategies, then adapts play based on observed opponent tendencies.
+# Run live demo
+python3 demo_live.py
 
-## Repository Structure
-
-```
-TiltStack/
-├── src/
-│   ├── pysrc/          # High-level Python implementation
-│   │   ├── Node.py     # Game tree node definitions and utilities
-│   │   ├── Leduc.py    # Leduc Hold'em CFR solver
-│   │   └── ...
-│   └── cppsrc/         # Performance-critical C++ code (PyBind11)
-│       └── ...
-├── demos/
-│   └── kuhn/           # Kuhn Poker reference implementation
-│       ├── Node.py
-│       └── Kuhn.py
-└── README.md
+# Run evaluation
+python3 test_exploitative.py
 ```
 
-### src/pysrc
+## Results
 
-Contains the high-level Python implementation of the poker AI. This includes:
+- **1.43x improvement** vs tight opponents
+- **1.26x improvement** vs loose-passive opponents
 
-- **Node.py**: Core game tree abstractions including `Action`, `Rank`, `NodeInfo`, and `Node` classes. Handles game state representation, legal move generation, payout calculation, and regret tracking for CFR.
+## Architecture
 
-- **Leduc.py**: CFR solver for Leduc Hold'em poker. Implements the full CFR algorithm with proper information set handling and strategy accumulation.
+1. **GTO Baseline**: CFR-trained Nash equilibrium strategy
+2. **Opponent Modeling**: Rule-based classification (Tight/Loose-Passive/Aggressive)
+3. **Exploitative Strategies**: Hardcoded counter-strategies per opponent type
 
-### src/cppsrc
+## Team
 
-Will contain performance-critical C++ code exposed to Python via PyBind11. This allows the project to maintain a clean Python API while achieving the performance necessary for solving larger poker variants.
+- Corey Zhang (PM, Algorithms)
+- [Other team members]
 
-### demos/kuhn
-
-Reference implementation of CFR for Kuhn Poker, a simplified 3-card poker game. Useful for understanding the core CFR algorithm before tackling more complex variants.
-
-## Current Status
-
-- Leduc Hold'em CFR solver implemented and verified
-- Kuhn Poker demo available for reference
-- C++ backend planned for performance optimization
-
-## Authors
-
-**PMs:** Nathaniel Potter && Corey Zhang
-
-- Forrest Chai
-- Sophie Fong
-- Michelle Wang
-- Chris Yoon
+## Midway Showcase: April 4, 2026
