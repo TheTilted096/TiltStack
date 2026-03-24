@@ -16,9 +16,10 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
 # ── Paths ─────────────────────────────────────────────────────────────
-OUTPUT_DIR      = os.path.join(os.path.dirname(__file__), "..", "output")
+OUTPUT_DIR      = os.path.join(os.path.dirname(__file__), "..", "clusters")
 LABELS_PATH     = os.path.join(OUTPUT_DIR, "river_labels.bin")
 CENTROIDS_PATH  = os.path.join(OUTPUT_DIR, "river_centroids.npy")
+EHS_PATH        = os.path.join(OUTPUT_DIR, "river_ehs.bin")
 OUTPUT_PATH     = os.path.join(OUTPUT_DIR, "river_labels_viz.png")
 K               = 8192
 
@@ -202,9 +203,8 @@ def plot_cluster_sizes(axes, counts, n):
                  xytext=(pct50 + 10, 40), arrowprops=dict(arrowstyle="->", color="#9C27B0"))
 
 
-def compute_centroid_features(centroids):
+def compute_centroid_features(centroids, mean_ehs):
     """Pre-compute shared features: mean EHS, PCA projection, variance explained."""
-    mean_ehs = centroids.mean(axis=1) / 255.0  # true equity 0.0-1.0
     mean_vec = centroids.mean(axis=0)
     centered = centroids - mean_vec
     U, S, Vt = np.linalg.svd(centered, full_matrices=False)
@@ -456,7 +456,14 @@ def main():
     # Pre-compute shared centroid features (needed to pick representatives)
     mean_ehs = proj = var_explained = None
     if has_centroids:
-        mean_ehs, proj, var_explained = compute_centroid_features(centroids)
+        ehs_path = os.path.abspath(EHS_PATH)
+        if not os.path.isfile(ehs_path):
+            print(f"WARNING: EHS file not found at {ehs_path} — skipping centroid plots.")
+            has_centroids = False
+        else:
+            print(f"EHS loaded from {ehs_path}")
+            mean_ehs = np.fromfile(ehs_path, dtype=np.float32)
+            mean_ehs, proj, var_explained = compute_centroid_features(centroids, mean_ehs)
 
     # Single-pass scan: counts + reservoir samples for representative clusters
     indexer = try_import_hand_indexer()

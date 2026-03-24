@@ -54,11 +54,12 @@ from flop_clusterer import (assign_flop_labels, compute_wide_turn_ehs,
 # Fixed paths
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR            = Path("output")
+OUTPUT_DIR            = Path("clusters")
 TURN_LABELS_PATH      = OUTPUT_DIR / "turn_labels.bin"
 TURN_CENTROIDS_PATH   = OUTPUT_DIR / "turn_centroids.npy"
 RIVER_CENTROIDS_PATH  = OUTPUT_DIR / "river_centroids.npy"
 CENTROIDS_PATH        = OUTPUT_DIR / "flop_centroids.npy"
+EHS_PATH              = OUTPUT_DIR / "flop_ehs.bin"
 LABELS_PATH           = OUTPUT_DIR / "flop_labels.bin"
 
 
@@ -137,8 +138,12 @@ class FlopClusterPipeline:
 
         centroids = train_flop_centroids(all_cdfs, self.k, self.niter, self.seed)
         centroids = sort_flop_centroids(centroids, wide_turn_ehs)
+        pdf = np.hstack([centroids[:, :1], np.diff(centroids, axis=1)])
+        ehs = (pdf @ wide_turn_ehs / (47.0 * 46.0 * 255.0)).astype(np.float32)
+        ehs.tofile(EHS_PATH)
         np.save(CENTROIDS_PATH, centroids)
         self.log(f"  Centroids saved: {CENTROIDS_PATH}")
+        self.log(f"  EHS saved:       {EHS_PATH}")
         return centroids
 
     def step_assign_labels(self, all_cdfs: np.ndarray,

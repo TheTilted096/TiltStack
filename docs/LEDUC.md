@@ -45,7 +45,7 @@ pip install -r requirements.txt
 | **Speed** | 3,810 iterations/sec |
 | **vs Vanilla CFR** | 56x better solution quality |
 
-See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for algorithm details and convergence analysis.
+See [LEDUC_IMPLEMENTATION.md](LEDUC_IMPLEMENTATION.md) for algorithm details and convergence analysis.
 
 ## Repository Structure
 

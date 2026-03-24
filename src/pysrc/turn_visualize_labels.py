@@ -21,10 +21,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # ── Paths ─────────────────────────────────────────────────────────────
-OUTPUT_DIR           = os.path.join(os.path.dirname(__file__), "..", "output")
+OUTPUT_DIR           = os.path.join(os.path.dirname(__file__), "..", "clusters")
 LABELS_PATH          = os.path.join(OUTPUT_DIR, "turn_labels.bin")
 CENTROIDS_PATH       = os.path.join(OUTPUT_DIR, "turn_centroids.npy")
-RIVER_CENTROIDS_PATH = os.path.join(OUTPUT_DIR, "river_centroids.npy")
+EHS_PATH             = os.path.join(OUTPUT_DIR, "turn_ehs.bin")
 OUTPUT_PATH          = os.path.join(OUTPUT_DIR, "turn_labels_viz.png")
 K                    = 8192
 
@@ -119,12 +119,6 @@ def find_example_indices(labels_path, cluster_ids, n_examples=5, seed=None,
     return reservoir
 
 
-# ── Wide EHS ─────────────────────────────────────────────────────────
-def compute_wide_ehs(river_centroids: np.ndarray) -> np.ndarray:
-    """Compute average EHS (0-255 scale) for each of the 256 wide buckets."""
-    fine_ehs = river_centroids.mean(axis=1)          # (8192,)
-    return fine_ehs.reshape(256, 32).mean(axis=1)    # (256,)
-
 
 # ── Statistics ───────────────────────────────────────────────────────
 def gini(counts):
@@ -210,16 +204,8 @@ def plot_cluster_sizes(axes, counts, n):
                  arrowprops=dict(arrowstyle="->", color="#9C27B0"))
 
 
-def compute_centroid_features(centroids, wide_ehs):
-    """Pre-compute shared features: E[EHS], PCA projection, variance explained.
-
-    centroids are CDF vectors (raw counts, NOT divided by 46).  We revert to
-    PDF via finite differences, then scale by 46 * 255 to obtain true equity
-    in [0, 1].
-    """
-    # CDF → PDF (first bucket = first CDF value; remaining = consecutive diffs)
-    pdf = np.hstack([centroids[:, :1], np.diff(centroids, axis=1)])  # (K, 256)
-    expected_ehs = (pdf @ wide_ehs) / (46.0 * 255.0)                 # (K,) in [0, 1]
+def compute_centroid_features(centroids, expected_ehs):
+    """Pre-compute shared features: E[EHS], PCA projection, variance explained."""
     mean_vec = centroids.mean(axis=0)
     centered = centroids - mean_vec
     U, S, Vt = np.linalg.svd(centered, full_matrices=False)
@@ -389,10 +375,10 @@ def plot_hands(counts, expected_ehs, output_path, hand_examples):
 
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
-    labels_path          = os.path.abspath(LABELS_PATH)
-    centroids_path       = os.path.abspath(CENTROIDS_PATH)
-    river_centroids_path = os.path.abspath(RIVER_CENTROIDS_PATH)
-    output_path          = os.path.abspath(OUTPUT_PATH)
+    labels_path    = os.path.abspath(LABELS_PATH)
+    centroids_path = os.path.abspath(CENTROIDS_PATH)
+    ehs_path       = os.path.abspath(EHS_PATH)
+    output_path    = os.path.abspath(OUTPUT_PATH)
     k                    = K
 
     if not os.path.isfile(labels_path):
@@ -406,19 +392,16 @@ def main():
     else:
         print(f"No turn centroids found at {centroids_path} — skipping centroid plots.")
 
-    # Compute wide EHS from river centroids (needed to interpret turn centroids)
+    # Load E[EHS] per cluster from file.
     expected_ehs = proj = var_explained = None
     if has_centroids:
-        river_centroids = load_centroids(river_centroids_path)
-        if river_centroids is None:
-            print(f"WARNING: river_centroids.npy not found at {river_centroids_path}. "
-                  "Cannot compute E[EHS] — skipping centroid plots.")
+        if not os.path.isfile(ehs_path):
+            print(f"WARNING: EHS file not found at {ehs_path} — skipping centroid plots.")
             has_centroids = False
         else:
-            print(f"River centroids loaded: {river_centroids.shape}")
-            wide_ehs = compute_wide_ehs(river_centroids)
+            print(f"EHS loaded from {ehs_path}")
             expected_ehs, proj, var_explained = compute_centroid_features(
-                centroids, wide_ehs)
+                centroids, np.fromfile(ehs_path, dtype=np.float32))
 
     # Single-pass scan: counts + reservoir samples for representative clusters
     indexer = try_import_hand_indexer()

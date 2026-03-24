@@ -1,0 +1,13 @@
+name: tiltstack
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - matplotlib
+  - pybind11
+  - faiss-gpu       # required for all clustering pipelines
+  - pip
+  - pip:
+      - setuptools>=42.0.0

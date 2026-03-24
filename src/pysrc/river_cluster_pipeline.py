@@ -36,10 +36,11 @@ from river_clusterer import (assign_labels_streaming, gpu_available,
 # Fixed output paths
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR     = Path("output")
+OUTPUT_DIR     = Path("clusters")
 INDICES_PATH   = OUTPUT_DIR / "river_sample_indices.bin"
 SAMPLE_PATH    = OUTPUT_DIR / "river_sample.npy"
 CENTROIDS_PATH = OUTPUT_DIR / "river_centroids.npy"
+EHS_PATH       = OUTPUT_DIR / "river_ehs.bin"
 LABELS_PATH    = OUTPUT_DIR / "river_labels.bin"
 
 NUM_RIVER_STATES = 2_428_287_420
@@ -115,8 +116,11 @@ class ClusterPipeline:
         sample = np.load(SAMPLE_PATH)
         centroids = train_centroids(sample, self.k, self.niter, self.seed)
         centroids = sort_centroids_by_ehs(centroids)
+        ehs = (centroids.mean(axis=1) / 255.0).astype(np.float32)
+        ehs.tofile(EHS_PATH)
         np.save(CENTROIDS_PATH, centroids)
         self.log(f"  Centroids saved: {CENTROIDS_PATH}")
+        self.log(f"  EHS saved:       {EHS_PATH}")
 
     def step_assign_labels(self):
         """Stream all states and assign cluster labels."""

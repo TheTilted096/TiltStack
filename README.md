@@ -15,8 +15,6 @@ TiltStack/
 ├── src/                        # Texas Hold'em infrastructure
 │   ├── Makefile                #   Build system
 │   ├── setup.py                #   PyBind11 config for hand_indexer
-│   ├── docs/
-│   │   └── CLUSTERING.md       #   Full clustering pipeline documentation
 │   ├── cppsrc/
 │   │   ├── river_expander.cpp  #   C++ river equity computation engine
 │   │   ├── turn_expander.cpp   #   C++ turn histogram computation engine
@@ -38,16 +36,24 @@ TiltStack/
 ├── demos/
 │   ├── kuhn/                   # Kuhn Poker — vanilla CFR reference implementation
 │   └── leduc/                  # Leduc Hold'em — CFR+ solver
-│       ├── docs/IMPLEMENTATION.md
 │       └── src/
 │           ├── cppsrc/         #   C++ CFR+ solver (PyBind11)
 │           └── pysrc/          #   Python training & output layer
-├── requirements.txt            # Root dependencies (numpy, faiss-gpu, matplotlib)
+├── docs/                       # All documentation
+│   ├── SETUP.md                #   Environment setup and pipeline instructions
+│   ├── CLUSTERING.md           #   Hold'em abstraction pipeline technical reference
+│   └── leduc/
+│       ├── README.md           #   Leduc CFR+ solver overview
+│       └── IMPLEMENTATION.md   #   Algorithm details and convergence analysis
+├── environment.yml             # Conda environment (Python 3.11, faiss-gpu, numpy, matplotlib)
+├── requirements.txt            # pip dependencies (numpy, faiss-cpu, pybind11, matplotlib)
 ├── README.md
 └── LICENSE
 ```
 
 ## Quick Start
+
+See [docs/SETUP.md](docs/SETUP.md) for full environment setup instructions, including Conda environment creation and build troubleshooting.
 
 ### Kuhn Poker (no build step)
 
@@ -66,7 +72,7 @@ make test      # Train CFR+ (100k iterations)
 make best      # Compute Best Response exploitability
 ```
 
-See the [Leduc README](demos/leduc/README.md) for performance benchmarks and usage.
+See the [Leduc README](docs/leduc/README.md) for performance benchmarks and usage.
 
 ### Hold'em Abstraction Pipeline
 
@@ -85,7 +91,7 @@ python pysrc/flop_cluster_pipeline.py
 python pysrc/flop_visualize_labels.py
 ```
 
-GPU (FAISS) is required for all clustering pipelines. See [src/docs/CLUSTERING.md](src/docs/CLUSTERING.md) for parameters, output files, and technical details.
+GPU (FAISS) is required for all clustering pipelines. See [docs/CLUSTERING.md](docs/CLUSTERING.md) for parameters, output files, and technical details.
 
 ## Components
 
@@ -101,13 +107,13 @@ Three-stage K-means clustering pipeline that abstracts Texas Hold'em into bucket
 
 Each stage reads the labels and centroids from the previous stage. All pipelines use FAISS GPU K-means and write `uint16` label files plus `float32` centroid arrays.
 
-See [src/docs/CLUSTERING.md](src/docs/CLUSTERING.md) for the full technical documentation.
+See [docs/CLUSTERING.md](docs/CLUSTERING.md) for the full technical documentation.
 
 ### Leduc Hold'em Solver (`demos/leduc/`)
 
 Self-contained CFR+ solver for Leduc Hold'em with a C++ core exposed to Python via PyBind11. Converges to 0.00 mBB exploitability in 14k iterations at ~3,810 iterations/second.
 
-See the [Leduc README](demos/leduc/README.md) and [Implementation Notes](demos/leduc/docs/IMPLEMENTATION.md).
+See the [Leduc README](docs/leduc/README.md) and [Implementation Notes](docs/leduc/IMPLEMENTATION.md).
 
 ### Kuhn Poker (`demos/kuhn/`)
 
@@ -124,7 +130,7 @@ pybind11
 matplotlib
 ```
 
-Install with `pip install -r requirements.txt`. Use `faiss-cpu` if no GPU is available (clustering pipelines will not run, but visualizations will).
+Install with `pip install -r requirements.txt`. A GPU is required — the clustering pipelines are not practical to run on CPU.
 
 ### System Requirements
 

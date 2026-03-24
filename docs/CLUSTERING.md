@@ -20,7 +20,7 @@ Or via make:
 ```bash
 make             # Equivalent to pip install -e . --no-build-isolation
 make clean       # Remove build artifacts
-make clean-hard  # Also remove output/
+make clean-hard  # Also remove clusters/
 ```
 
 ---
@@ -123,7 +123,7 @@ Because all flop states fit in RAM, no sampling or intermediate disk files are n
 ## Output Files
 
 ```
-src/output/
+src/clusters/
 ├── river_centroids.npy                  # 8192 × 169  float32
 ├── river_labels.bin                     # 2,428,287,420 × uint16
 ├── river_labels_viz.png                 # Cluster size distribution + PCA + equity profiles

@@ -21,16 +21,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # ── Paths ─────────────────────────────────────────────────────────────
-OUTPUT_DIR            = os.path.join(os.path.dirname(__file__), "..", "output")
+OUTPUT_DIR            = os.path.join(os.path.dirname(__file__), "..", "clusters")
 LABELS_PATH           = os.path.join(OUTPUT_DIR, "flop_labels.bin")
 CENTROIDS_PATH        = os.path.join(OUTPUT_DIR, "flop_centroids.npy")
-TURN_CENTROIDS_PATH   = os.path.join(OUTPUT_DIR, "turn_centroids.npy")
-RIVER_CENTROIDS_PATH  = os.path.join(OUTPUT_DIR, "river_centroids.npy")
+EHS_PATH              = os.path.join(OUTPUT_DIR, "flop_ehs.bin")
 OUTPUT_PATH           = os.path.join(OUTPUT_DIR, "flop_labels_viz.png")
 K                     = 2048
 
-# EHS normalization denominator: pdf sums to 47, wide_turn_ehs is in [0, 46*255]
-_EHS_NORM = 47.0 * 46.0 * 255.0
 
 
 # ── Data loading ─────────────────────────────────────────────────────
@@ -107,21 +104,6 @@ def try_import_hand_indexer():
         print(f"WARNING: {e} — example hands will be skipped.", file=sys.stderr)
         return None
 
-
-# ── Wide turn EHS ─────────────────────────────────────────────────────
-def compute_wide_turn_ehs(turn_centroids: np.ndarray,
-                          river_centroids: np.ndarray) -> np.ndarray:
-    """Compute average EHS (in [0, 46*255] scale) for each of 256 wide turn buckets.
-
-    Mirrors flop_clusterer.compute_wide_turn_ehs exactly.
-    """
-    fine_river_ehs = river_centroids.mean(axis=1)                   # (8192,) [0, 255]
-    wide_river_ehs = fine_river_ehs.reshape(256, 32).mean(axis=1)   # (256,)
-
-    pdf_turn = np.hstack([turn_centroids[:, :1],
-                          np.diff(turn_centroids, axis=1)])          # (8192, 256)
-    fine_turn_ehs = pdf_turn @ wide_river_ehs                        # (8192,) [0, 46*255]
-    return fine_turn_ehs.reshape(256, 32).mean(axis=1)               # (256,)
 
 
 # ── Statistics ───────────────────────────────────────────────────────
@@ -205,15 +187,8 @@ def plot_cluster_sizes(axes, counts, n):
                  arrowprops=dict(arrowstyle="->", color="#9C27B0"))
 
 
-def compute_centroid_features(centroids, wide_turn_ehs):
-    """Pre-compute shared features: E[EHS], PCA projection, variance explained.
-
-    centroids are CDF vectors (raw counts, NOT divided by 47).  We revert to
-    PDF via finite differences, then scale by 47 * 46 * 255 to obtain true
-    equity in [0, 1].
-    """
-    pdf = np.hstack([centroids[:, :1], np.diff(centroids, axis=1)])  # (K, 256)
-    expected_ehs = (pdf @ wide_turn_ehs) / _EHS_NORM                 # (K,) in [0, 1]
+def compute_centroid_features(centroids, expected_ehs):
+    """Pre-compute shared features: E[EHS], PCA projection, variance explained."""
     mean_vec = centroids.mean(axis=0)
     centered = centroids - mean_vec
     U, S, Vt = np.linalg.svd(centered, full_matrices=False)
@@ -381,11 +356,10 @@ def plot_hands(counts, expected_ehs, output_path, hand_examples):
 
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
-    labels_path          = os.path.abspath(LABELS_PATH)
-    centroids_path       = os.path.abspath(CENTROIDS_PATH)
-    turn_centroids_path  = os.path.abspath(TURN_CENTROIDS_PATH)
-    river_centroids_path = os.path.abspath(RIVER_CENTROIDS_PATH)
-    output_path          = os.path.abspath(OUTPUT_PATH)
+    labels_path    = os.path.abspath(LABELS_PATH)
+    centroids_path = os.path.abspath(CENTROIDS_PATH)
+    ehs_path       = os.path.abspath(EHS_PATH)
+    output_path    = os.path.abspath(OUTPUT_PATH)
     k                    = K
 
     if not os.path.isfile(labels_path):
@@ -399,25 +373,16 @@ def main():
     else:
         print(f"No flop centroids found at {centroids_path} — skipping centroid plots.")
 
-    # Compute wide turn EHS (requires turn + river centroids)
+    # Load E[EHS] per cluster from file.
     expected_ehs = proj = var_explained = None
-    wide_turn_ehs = None
     if has_centroids:
-        turn_centroids  = load_centroids(turn_centroids_path)
-        river_centroids = load_centroids(river_centroids_path)
-        if turn_centroids is None or river_centroids is None:
-            missing = []
-            if turn_centroids is None:  missing.append("turn_centroids.npy")
-            if river_centroids is None: missing.append("river_centroids.npy")
-            print(f"WARNING: {', '.join(missing)} not found. "
-                  "Cannot compute E[EHS] — skipping centroid plots.")
+        if not os.path.isfile(ehs_path):
+            print(f"WARNING: EHS file not found at {ehs_path} — skipping centroid plots.")
             has_centroids = False
         else:
-            print(f"Turn centroids loaded:  {turn_centroids.shape}")
-            print(f"River centroids loaded: {river_centroids.shape}")
-            wide_turn_ehs = compute_wide_turn_ehs(turn_centroids, river_centroids)
+            print(f"EHS loaded from {ehs_path}")
             expected_ehs, proj, var_explained = compute_centroid_features(
-                centroids, wide_turn_ehs)
+                centroids, np.fromfile(ehs_path, dtype=np.float32))
 
     # Single-pass scan: counts + reservoir samples for representative clusters
     indexer = try_import_hand_indexer()

@@ -7,8 +7,6 @@ demos/leduc/
 ├── Makefile                 # Build targets: install, build, test, best, clean
 ├── setup.py                 # PyBind11 compilation config (C++20, /O2 or -O3)
 ├── requirements.txt         # pybind11, setuptools, matplotlib
-├── docs/
-│   └── IMPLEMENTATION.md    # This file
 ├── src/
 │   ├── cppsrc/
 │   │   ├── Node.h           # Type declarations: Action, Rank, Outcome, NodeInfo, Node

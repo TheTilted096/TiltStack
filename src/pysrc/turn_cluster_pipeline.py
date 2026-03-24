@@ -52,12 +52,13 @@ from turn_clusterer import (assign_turn_labels_streaming, compute_wide_ehs,
 # Fixed paths
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR            = Path("output")
+OUTPUT_DIR            = Path("clusters")
 RIVER_LABELS_PATH     = OUTPUT_DIR / "river_labels.bin"
 RIVER_CENTROIDS_PATH  = OUTPUT_DIR / "river_centroids.npy"
 INDICES_PATH          = OUTPUT_DIR / "turn_sample_indices.bin"
 SAMPLE_PATH           = OUTPUT_DIR / "turn_sample.npy"
 CENTROIDS_PATH        = OUTPUT_DIR / "turn_centroids.npy"
+EHS_PATH              = OUTPUT_DIR / "turn_ehs.bin"
 LABELS_PATH           = OUTPUT_DIR / "turn_labels.bin"
 
 
@@ -156,8 +157,12 @@ class TurnClusterPipeline:
 
         centroids = train_turn_centroids(sample, self.k, self.niter, self.seed)
         centroids = sort_turn_centroids(centroids, wide_ehs)
+        pdf = np.hstack([centroids[:, :1], np.diff(centroids, axis=1)])
+        ehs = (pdf @ wide_ehs / (46.0 * 255.0)).astype(np.float32)
+        ehs.tofile(EHS_PATH)
         np.save(CENTROIDS_PATH, centroids)
         self.log(f"  Centroids saved: {CENTROIDS_PATH}")
+        self.log(f"  EHS saved:       {EHS_PATH}")
 
     def step_assign_labels(self):
         """Stream all turn states and assign cluster labels."""

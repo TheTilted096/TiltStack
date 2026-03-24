@@ -6,7 +6,7 @@
 #  Usage (from src/):
 #    make                  # build hand_indexer pybind module
 #    make clean            # remove build/ artifacts and pysrc/hand_indexer.*
-#    make clean-hard       # also remove output/
+#    make clean-hard       # also remove clusters/
 #
 #  Clustering pipeline:
 #    python pysrc/river_cluster_pipeline.py [options]
@@ -49,7 +49,7 @@ clean:
 
 clean-hard:
 	-if exist build rmdir /S /Q build
-	-if exist output rmdir /S /Q output
+	-if exist clusters rmdir /S /Q clusters
 	-if exist hand_indexer.egg-info rmdir /S /Q hand_indexer.egg-info
 	-del /Q pysrc\hand_indexer.* 2>nul
 else
@@ -57,5 +57,5 @@ clean:
 	rm -rf build *.egg-info pysrc/hand_indexer.*
 
 clean-hard:
-	rm -rf build output *.egg-info pysrc/hand_indexer.*
+	rm -rf build clusters *.egg-info pysrc/hand_indexer.*
 endif

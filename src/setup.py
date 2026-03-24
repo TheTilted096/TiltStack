@@ -45,7 +45,7 @@ setup(
                 'cppsrc/river_expander.cpp',
                 'cppsrc/turn_expander.cpp',
                 'cppsrc/flop_expander.cpp',
-                'third_party/OMPEval/omp/HandEvaluator.cpp',
+                'third_party/OMPEval/HandEvaluator.cpp',
                 'third_party/hand-isomorphism/hand_index.c',
                 'third_party/hand-isomorphism/deck.c',
             ],
