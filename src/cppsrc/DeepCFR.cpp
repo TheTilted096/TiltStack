@@ -35,7 +35,8 @@ float deepcfr(CFRGame& game, int id, bool hero){
         }
 
         for (int j = 0; j < numMoves; j++){
-            trueRegret[j] = actionUtils[j] - nodeEV;
+            int actionInt = static_cast<int>(moves[j]);
+            trueRegret[actionInt] = actionUtils[actionInt] - nodeEV;
         }
 
         // stuff to train the advantage network on

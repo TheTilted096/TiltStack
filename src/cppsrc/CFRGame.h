@@ -18,7 +18,7 @@ inline uint64_t fastRand(){
 class CFRGame{
     public:
         std::array<BoardState, MAX_ACTIONS * NUM_ROUNDS + 1> history;
-        CardArr hole, flop, turn, river;
+        uint64_t hole[2], flop, turn, river;
 
         int ply;
 

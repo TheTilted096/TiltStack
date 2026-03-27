@@ -40,6 +40,13 @@ void CFRGame::begin(int ss1, int ss2, bool h){
 
     std::memcpy(holeCards, deck, 4);
     std::memcpy(board.data(), deck + 4, 5);
+
+    hole[0] = (1ULL << holeCards[0][0]) | (1ULL << holeCards[0][1]);
+    hole[1] = (1ULL << holeCards[1][0]) | (1ULL << holeCards[1][1]);
+
+    flop  = (1ULL << board[0]) | (1ULL << board[1]) | (1ULL << board[2]);
+    turn  = (1ULL << board[3]);
+    river = (1ULL << board[4]);
 }
 
 bool CFRGame::isFold(const Action& a){
@@ -71,7 +78,7 @@ int CFRGame::isTerminalState(const Action& a){ // 2 showdown, 1 fold, 0 continue
             return 2;
         }
 
-        if ((a == Action::CALL) and (lastAction() == Action::ALLIN)){
+        if ((a == Action::CALL) and (stacks[!stm()] == 0 || stacks[stm()] == history[ply].toCall)){
             return 2;
         }
     }
@@ -121,7 +128,7 @@ void CFRGame::makeMove(const Action& a){
     betHist[roundNum][numActs] = static_cast<float>(now.toCall) / (last.pot + last.toCall);
 
     currentRound = static_cast<Round>(roundNum + streetEnded);
-    streetBucket[roundNum + streetEnded]; // TODO: LOOKUP BUCKET 
+    //streetBucket[roundNum + streetEnded]; // TODO: LOOKUP BUCKET 
 
     now.stm = streetEnded or !last.stm;
 }
@@ -197,6 +204,9 @@ int CFRGame::generateActions(ActionList& alist){
     // cur.toCall is the last raise increment (see makeMove: now.toCall = bet - last.toCall).
     int minRaise = cur.toCall + std::max(cur.toCall, BIG_BLIND);
 
+    int roundNum = static_cast<int>(currentRound);
+    int numActs  = actionCount[roundNum];
+
     int n = 0;
 
     // CHECK / FOLD: always legal (fold when toCall > 0, check otherwise).
@@ -208,21 +218,68 @@ int CFRGame::generateActions(ActionList& alist){
         alist[n++] = Action::CALL;
     }
 
-    // BET50: valid if the computed amount meets the min raise and the player can afford it.
-    if (bet50Amt >= minRaise && bet50Amt <= playerStack) {
+    // On the penultimate action (numActs == MAX_ACTIONS - 1), BET50 and BET100 are suppressed
+    // so that ALLIN is the only raise — unless the amount equals allinAmt, in which case the
+    // standard dedup takes the more passive label.  After a penultimate ALLIN the bettor's stack
+    // is 0, so allinAmt == callAmt on the final action and all raise conditions fail naturally;
+    // no explicit cap on numActs is needed here.
+    bool penultimate = (numActs == MAX_ACTIONS - 2);
+
+    // allinAmt = min(playerStack, callAmt + oppStack) ensures both stacks stay non-negative.
+    bool hasBet50 = false;
+    if (bet50Amt >= minRaise && bet50Amt <= allinAmt && (!penultimate || bet50Amt == allinAmt)) {
+        hasBet50 = true;
         alist[n++] = Action::BET50;
     }
 
-    // BET100: same validity check; skip if it somehow equals BET50 (rounding).
-    if (bet100Amt >= minRaise && bet100Amt <= playerStack && bet100Amt != bet50Amt) {
+    bool hasBet100 = false;
+    if (bet100Amt >= minRaise && bet100Amt != bet50Amt && bet100Amt <= allinAmt
+            && (!penultimate || bet100Amt == allinAmt)) {
+        hasBet100 = true;
         alist[n++] = Action::BET100;
     }
 
-    // ALLIN: include whenever it is a true raise (more than a call).
-    // Skip if the amount equals BET50 or BET100 — prefer the more passive label.
-    if (allinAmt > callAmt && allinAmt != bet50Amt && allinAmt != bet100Amt) {
+    // ALLIN is legal whenever it is a true raise, even below minRaise (sub-minimum shove).
+    // Dedup only against bets that were actually emitted — a rejected BET50/BET100 does not
+    // make ALLIN redundant.
+    if (allinAmt > callAmt
+            && !(hasBet50  && allinAmt == bet50Amt)
+            && !(hasBet100 && allinAmt == bet100Amt)) {
         alist[n++] = Action::ALLIN;
     }
 
     return n;
+}
+
+InfoSet CFRGame::getInfo(){
+    InfoSet info;
+    const BoardState& cur = history[ply];
+    int roundNum = static_cast<int>(currentRound);
+    bool stm = cur.stm;
+
+    float effStack = static_cast<float>(std::min(initialStacks[0], initialStacks[1]));
+
+    info.myStack  = static_cast<float>(stacks[stm])  / effStack;
+    info.oppStack = static_cast<float>(stacks[!stm]) / effStack;
+    info.potSize  = static_cast<float>(cur.pot)      / effStack;
+    info.toCall   = static_cast<float>(cur.toCall)   / effStack;
+    info.currentEHS = cur.ehs;
+
+    std::memcpy(info.betHist, betHist, sizeof(betHist));
+
+    info.hole  = hole[stm];
+    info.flop  = flop  * (currentRound >= Round::FLOP);
+    info.turn  = turn  * (currentRound >= Round::TURN);
+    info.river = river * (currentRound >= Round::RIVER);
+
+    // One-hot encode current round
+    info.streetEmbed.fill(false);
+    info.streetEmbed[roundNum] = true;
+    info.isButton = (stm == 0);
+
+    for (int i = 0; i < NUM_ROUNDS - 1; i++){
+        info.streetBucket[i] = streetBucket[i];
+    }
+
+    return info;
 }

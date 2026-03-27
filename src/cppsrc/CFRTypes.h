@@ -6,8 +6,6 @@
 #include <cstring>
 #include <vector>
 
-// #include "../third_party/..."
-
 using Card = uint8_t;
 
 constexpr int NUM_PLAYERS = 2;
@@ -37,7 +35,22 @@ using CardArr = std::array<float, 52>; // array of 0.0 or 1.0 depending on card
 
 using ActionList = std::array<Action, NUM_ACTIONS>;
 
-struct InfoSet{};
+struct InfoSet{
+    // 8-byte: card presence bitfields (52 LSBs used, one bit per card index)
+    uint64_t hole, flop, turn, river;
+
+    // 4-byte: normalised scalars and betting history
+    float myStack, oppStack, potSize, toCall;
+    float currentEHS;
+    float betHist[NUM_ROUNDS][MAX_ACTIONS];
+
+    // 2-byte: street abstraction buckets (flop/turn/river)
+    std::array<uint16_t, NUM_ROUNDS - 1> streetBucket;
+
+    // 1-byte: one-hot round encoding and button flag
+    std::array<bool, NUM_ROUNDS> streetEmbed;
+    bool isButton; // true if stm == 0
+};
 
 struct BoardState{
     int pot;
@@ -46,6 +59,3 @@ struct BoardState{
     bool stm;
     Action act;
 };
-
-
-// put the random device here
