@@ -2,9 +2,12 @@
 K-means clustering for river equity vectors.
 
 Library functions used by river_cluster_pipeline.py:
-  train_centroids(sample, k, niter, seed)  -> np.ndarray  (K, 169) float32
-  sort_centroids_by_ehs(centroids)         -> np.ndarray  sorted copy
-  assign_labels_streaming(expander, centroids, out_path, batch_size)
+  gpu_available()
+  train_centroids(sample, k, niter, seed)                   -> (K, 169) float32
+  assign_labels_and_ehs_fine_streaming(                     -> (K,) float32 per-cluster EHS
+      expander, centroids, labels_path, ehs_fine_path,
+      batch_size)
+  remap_labels_inplace(labels_path, sort_order)
 
 GPU (FAISS) is required — CPU clustering is not supported due to infeasible
 runtime on the ~2.4B river states dataset.
@@ -38,13 +41,13 @@ def train_centroids(sample: np.ndarray, k: int, niter: int,
     """Train K-means centroids using FAISS on GPU.
 
     Args:
-        sample:  (N, D) float32 training vectors.
+        sample:  (N, 169) float32 equity vectors.
         k:       Number of clusters.
         niter:   K-means iterations.
         seed:    Random seed.
 
     Returns:
-        (k, D) float32 centroid matrix.
+        (k, 169) float32 centroid matrix (unsorted).
     """
     d = sample.shape[1]
     print(f"Training K={k:,} centroids, {niter} iterations on GPU "
@@ -63,19 +66,23 @@ def train_centroids(sample: np.ndarray, k: int, niter: int,
     return kmeans.centroids.copy()
 
 
-def sort_centroids_by_ehs(centroids: np.ndarray) -> np.ndarray:
-    """Return a copy of centroids sorted by mean equity (ascending)."""
-    ehs = centroids.mean(axis=1)
-    return centroids[np.argsort(ehs)]
+def assign_labels_and_ehs_fine_streaming(
+        expander, centroids: np.ndarray,
+        labels_path: str, ehs_fine_path: str,
+        batch_size: int = 1_000_000) -> np.ndarray:
+    """Assign cluster labels and write per-state EHS to disk in a single pass.
 
+    Uses expander.expand_all_with_ehs_mult() to stream equity vectors, per-state
+    EHS, and multiplicities simultaneously.  Per-state EHS is the
+    multiplicity-weighted equity over all concrete opponent hands (computed in
+    C++ as totalEqSum / totalCount).
 
-def assign_labels_streaming(expander, centroids: np.ndarray, out_path: str,
-                             batch_size: int = 1_000_000) -> None:
-    """Assign cluster labels to all states via a pybind expander.
+    Writes:
+      labels_path:   uint16 label for every river state (in canonical index order)
+      ehs_fine_path: uint16 EHS for every river state (decode: value / 65535.0)
 
-    Streams equity vectors in batches via expander.expand_all() to avoid
-    materialising all states in memory at once. Writes raw uint16 labels
-    to out_path.
+    Returns:
+      (K,) float32 array of multiplicity-weighted per-cluster EHS.
     """
     k, d = centroids.shape
     assert k <= 65535, "K must fit in uint16"
@@ -91,28 +98,56 @@ def assign_labels_streaming(expander, centroids: np.ndarray, out_path: str,
     t0 = time.time()
     total_assigned = 0
 
-    with open(out_path, 'wb') as f:
-        def process_batch(batch_uint8):
-            nonlocal total_assigned
-            batch = batch_uint8.astype(np.float32)
-            _, labels = index.search(batch, 1)
-            f.write(labels.ravel().astype(np.uint16).tobytes())
-            total_assigned += len(batch)
+    ehs_sum  = np.zeros(k, dtype=np.float64)
+    mult_sum = np.zeros(k, dtype=np.float64)
 
-            elapsed = time.time() - t0
+    with open(labels_path, 'wb') as lf, open(ehs_fine_path, 'wb') as ef:
+        def process_batch(equity_uint8, ehs_float32, mult_uint8):
+            nonlocal total_assigned, ehs_sum, mult_sum
+            equity = equity_uint8.astype(np.float32)
+            _, label_arr = index.search(equity, 1)
+            label_arr = label_arr.ravel().astype(np.uint16)
+            lf.write(label_arr.tobytes())
+
+            ehs_u16 = np.rint(ehs_float32 * 65535.0).astype(np.uint16)
+            ef.write(ehs_u16.tobytes())
+
+            ehs_f64 = ehs_float32.astype(np.float64)
+            mult    = mult_uint8.astype(np.float64)
+            ehs_sum  += np.bincount(label_arr, weights=ehs_f64 * mult,
+                                    minlength=k)
+            mult_sum += np.bincount(label_arr, weights=mult, minlength=k)
+            total_assigned += len(label_arr)
+
+            elapsed   = time.time() - t0
             done_frac = total_assigned / total_states
-            eta = elapsed / done_frac * (1 - done_frac) if done_frac > 0 else 0
-            rate = total_assigned / elapsed
+            eta       = elapsed / done_frac * (1 - done_frac) if done_frac > 0 else 0
+            rate      = total_assigned / elapsed
             print(f"\r  {100 * done_frac:.2f}%  ({total_assigned:,} / {total_states:,})  "
                   f"{rate / 1e6:.1f}M vec/s  ETA {eta / 60:.0f}m",
                   end='', file=sys.stderr)
 
-        expander.expand_all(process_batch, batch_size)
+        expander.expand_all_with_ehs_mult(process_batch, batch_size)
 
     elapsed = time.time() - t0
     rate = total_assigned / elapsed if elapsed > 0 else 0
     print(f"\nAssignment done: {total_assigned:,} vectors in {elapsed:.1f}s "
           f"({rate / 1e6:.1f}M vec/s)", file=sys.stderr)
     if total_assigned != total_states:
-        print(f"WARNING: assigned {total_assigned:,} vectors, "
-              f"expected {total_states:,}", file=sys.stderr)
+        print(f"WARNING: assigned {total_assigned:,}, expected {total_states:,}",
+              file=sys.stderr)
+
+    per_cluster_ehs = ehs_sum / np.maximum(mult_sum, 1.0)
+    return per_cluster_ehs.astype(np.float32)
+
+
+def remap_labels_inplace(labels_path: str, sort_order: np.ndarray) -> None:
+    """Remap uint16 labels file in-place according to a sort permutation.
+
+    sort_order is the output of np.argsort(per_cluster_ehs), so
+    sort_order[new_label] = old_label and label 0 is the weakest cluster.
+    """
+    labels = np.fromfile(labels_path, dtype=np.uint16)
+    rank = np.empty(len(sort_order), dtype=np.uint16)
+    rank[sort_order] = np.arange(len(sort_order), dtype=np.uint16)
+    rank[labels].tofile(labels_path)

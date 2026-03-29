@@ -3,9 +3,11 @@
 Clustering pipeline for flop equity states.
 
 Orchestrates the full K-means clustering workflow:
-  1. Compute wide-bucket CDF vectors for all 1,286,792 flop states into RAM
-  2. Train K-means centroids (L1 / EMD distance) on the full dataset
-  3. Assign cluster labels to all states directly from the in-memory CDF matrix
+  1. Compute wide-bucket CDF vectors, per-state EHS, and multiplicities
+     for all 1,286,792 flop states into RAM; write flop_ehs_fine.bin
+  2. Train K-means centroids (L1 / EMD distance) on the full CDF dataset
+  3. Assign cluster labels; sort centroids by true multiplicity-weighted
+     per-cluster EHS; remap labels; write final output files
 
 Each flop state is represented as a 256-dim float32 CDF vector:
   - The C++ FlopExpander produces a uint8[256] count histogram over 256 wide
@@ -14,21 +16,21 @@ Each flop state is represented as a 256-dim float32 CDF vector:
   - The pipeline computes the cumulative sum of counts (NOT divided by 47),
     yielding a CDF vector with values in [0, 47].  L1 distance between CDFs is
     equivalent to the Earth Mover's Distance (Wasserstein-1).
-  - Centroids are sorted by expected EHS via a two-level wide-bucket average:
-    river_centroids -> wide_river_ehs -> E[EHS] per turn centroid ->
-    wide_turn_ehs -> E[EHS] per flop centroid.
+  - Centroids are sorted by the multiplicity-weighted average EHS of their
+    members, computed during step 3.
 
 Because all 1,286,792 states fit comfortably in RAM (~1.31 GB as float32 CDFs),
-no sampling or intermediate disk file is needed.  The pipeline runs in 3 steps
-(vs. 4 for the turn pipeline).
+no sampling or intermediate disk file is needed.  The pipeline runs in 3 steps.
+
+The FlopExpander loads both turn_labels.bin (~110 MB) and turn_ehs_fine.bin
+(~110 MB) simultaneously — total footprint ~220 MB.
 
 GPU (FAISS) is required.
 
 Requires the hand_indexer pybind module to be built first:
     cd src/ && pip install -e . --no-build-isolation
 
-Requires turn_labels.bin, turn_centroids.npy, and river_centroids.npy from the
-upstream clustering pipelines.
+Requires turn_labels.bin and turn_ehs_fine.bin from the upstream turn pipeline.
 
 Then run:
     python flop_cluster_pipeline.py
@@ -46,9 +48,8 @@ from pathlib import Path
 import numpy as np
 
 import hand_indexer
-from flop_clusterer import (assign_flop_labels, compute_wide_turn_ehs,
-                             gpu_available, sort_flop_centroids,
-                             train_flop_centroids)
+from flop_clusterer import (assign_flop_labels, gpu_available,
+                             remap_labels_inplace, train_flop_centroids)
 
 # ---------------------------------------------------------------------------
 # Fixed paths
@@ -56,10 +57,10 @@ from flop_clusterer import (assign_flop_labels, compute_wide_turn_ehs,
 
 OUTPUT_DIR            = Path("clusters")
 TURN_LABELS_PATH      = OUTPUT_DIR / "turn_labels.bin"
-TURN_CENTROIDS_PATH   = OUTPUT_DIR / "turn_centroids.npy"
-RIVER_CENTROIDS_PATH  = OUTPUT_DIR / "river_centroids.npy"
+TURN_EHS_FINE_PATH    = OUTPUT_DIR / "turn_ehs_fine.bin"
 CENTROIDS_PATH        = OUTPUT_DIR / "flop_centroids.npy"
 EHS_PATH              = OUTPUT_DIR / "flop_ehs.bin"
+EHS_FINE_PATH         = OUTPUT_DIR / "flop_ehs_fine.bin"
 LABELS_PATH           = OUTPUT_DIR / "flop_labels.bin"
 
 
@@ -79,13 +80,12 @@ class FlopClusterPipeline:
         self.verbose = verbose
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-        for path, name in [(TURN_LABELS_PATH,     "turn_labels.bin"),
-                           (TURN_CENTROIDS_PATH,  "turn_centroids.npy"),
-                           (RIVER_CENTROIDS_PATH, "river_centroids.npy")]:
+        for path, name in [(TURN_LABELS_PATH,   "turn_labels.bin"),
+                           (TURN_EHS_FINE_PATH, "turn_ehs_fine.bin")]:
             if not path.exists():
                 raise FileNotFoundError(
                     f"{name} not found at {path}. "
-                    "Run the upstream clustering pipeline first.")
+                    "Run the upstream turn clustering pipeline first.")
 
     def log(self, msg: str):
         if self.verbose:
@@ -96,16 +96,21 @@ class FlopClusterPipeline:
             os.environ[var] = str(self.threads)
 
     def _make_expander(self):
-        self.log("  Loading turn_labels.bin into RAM (~110 MB)...")
-        return hand_indexer.FlopExpander(str(TURN_LABELS_PATH))
+        self.log("  Loading turn_labels.bin (~110 MB) and "
+                 "turn_ehs_fine.bin (~110 MB) into RAM...")
+        return hand_indexer.FlopExpander(str(TURN_LABELS_PATH),
+                                         str(TURN_EHS_FINE_PATH))
 
     # ------------------------------------------------------------------
     # Pipeline steps
     # ------------------------------------------------------------------
 
-    def step_compute_cdfs(self):
-        """Compute wide-bucket CDF vectors for all flop states into RAM."""
-        self.log("==> Step 1/3: Computing CDF vectors for all flop states...")
+    def step_compute_data(self):
+        """Compute CDF vectors, EHS, and multiplicities for all flop states."""
+        if EHS_FINE_PATH.exists():
+            self.log("EHS fine already exists, loading CDF data from expander...")
+            # Still need CDFs for training; re-compute (cheap, ~5 s)
+        self.log("==> Step 1/3: Computing data for all flop states...")
         self._set_thread_env()
         expander   = self._make_expander()
         num_states = expander.num_states()
@@ -114,48 +119,65 @@ class FlopClusterPipeline:
         t0      = time.time()
         indices = np.arange(num_states, dtype=np.uint64)
 
-        # expander returns uint8 counts; compute CDF (cumsum) without normalising
-        all_cdfs = np.cumsum(
-            expander.compute_sample(indices).astype(np.float32), axis=1
-        )
+        hist, all_ehs, all_mult = expander.compute_sample_ehs_mult(indices)
+        all_cdfs = np.cumsum(hist.astype(np.float32), axis=1)
         self.log(f"  CDF matrix: {all_cdfs.shape[0]:,} x {all_cdfs.shape[1]}  "
                  f"({all_cdfs.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)")
-        return all_cdfs
+
+        if not EHS_FINE_PATH.exists():
+            np.rint(all_ehs * 65535.0).astype(np.uint16).tofile(EHS_FINE_PATH)
+            self.log(f"  EHS fine saved: {EHS_FINE_PATH}")
+        else:
+            all_ehs = np.fromfile(EHS_FINE_PATH, dtype=np.uint16).astype(np.float32) / 65535.0
+
+        return all_cdfs, all_ehs, all_mult
 
     def step_train_centroids(self, all_cdfs: np.ndarray) -> np.ndarray:
-        """Train K-means centroids (L1) on the full CDF matrix."""
+        """Train K-means centroids (L1) on the full CDF matrix (unsorted)."""
         if CENTROIDS_PATH.exists():
             self.log("Centroids already exist, skipping training.")
             return np.load(CENTROIDS_PATH)
 
         self.log(f"==> Step 2/3: Training K={self.k:,} centroids "
                  f"({self.niter} iterations, L1)...")
-        turn_centroids  = np.load(TURN_CENTROIDS_PATH)
-        river_centroids = np.load(RIVER_CENTROIDS_PATH)
-        wide_turn_ehs   = compute_wide_turn_ehs(turn_centroids, river_centroids)
-        self.log(f"  Wide turn EHS range: [{wide_turn_ehs.min():.4f}, "
-                 f"{wide_turn_ehs.max():.4f}]")
-
         centroids = train_flop_centroids(all_cdfs, self.k, self.niter, self.seed)
-        centroids = sort_flop_centroids(centroids, wide_turn_ehs)
-        pdf = np.hstack([centroids[:, :1], np.diff(centroids, axis=1)])
-        ehs = (pdf @ wide_turn_ehs / (47.0 * 46.0 * 255.0)).astype(np.float32)
-        ehs.tofile(EHS_PATH)
         np.save(CENTROIDS_PATH, centroids)
         self.log(f"  Centroids saved: {CENTROIDS_PATH}")
-        self.log(f"  EHS saved:       {EHS_PATH}")
         return centroids
 
-    def step_assign_labels(self, all_cdfs: np.ndarray,
-                           centroids: np.ndarray) -> None:
-        """Assign cluster labels to all flop states from the in-memory CDFs."""
-        if LABELS_PATH.exists():
-            self.log("Labels already exist, skipping assignment.")
+    def step_assign_sort_remap(self, all_cdfs: np.ndarray, all_ehs: np.ndarray,
+                               all_mult: np.ndarray,
+                               centroids: np.ndarray) -> None:
+        """Assign labels, sort by true per-cluster EHS, remap, write output files."""
+        if LABELS_PATH.exists() and EHS_PATH.exists():
+            self.log("Labels and EHS already exist, skipping assignment.")
             return
 
-        self.log("==> Step 3/3: Assigning labels to all flop states...")
-        assign_flop_labels(all_cdfs, centroids, str(LABELS_PATH))
-        self.log(f"  Labels saved: {LABELS_PATH}")
+        self.log("==> Step 3/3: Assigning labels, sorting, and remapping...")
+        k = len(centroids)
+
+        labels = assign_flop_labels(all_cdfs, centroids, str(LABELS_PATH))
+
+        # Multiplicity-weighted per-cluster EHS
+        mult    = all_mult.astype(np.float64)
+        ehs_wt  = all_ehs.astype(np.float64) * mult
+        ehs_sum = np.bincount(labels, weights=ehs_wt, minlength=k)
+        wt_sum  = np.bincount(labels, weights=mult,   minlength=k)
+        per_cluster_ehs = (ehs_sum / np.maximum(wt_sum, 1.0)).astype(np.float32)
+        self.log(f"  Per-cluster EHS range: "
+                 f"[{per_cluster_ehs.min():.4f}, {per_cluster_ehs.max():.4f}]")
+
+        sort_order = np.argsort(per_cluster_ehs)
+        centroids  = centroids[sort_order]
+        per_cluster_ehs[sort_order].tofile(EHS_PATH)
+        np.save(CENTROIDS_PATH, centroids)
+
+        self.log("  Remapping labels...")
+        remap_labels_inplace(str(LABELS_PATH), sort_order)
+
+        self.log(f"  Centroids saved: {CENTROIDS_PATH}")
+        self.log(f"  EHS saved:       {EHS_PATH}")
+        self.log(f"  Labels saved:    {LABELS_PATH}")
 
     def run(self):
         """Execute the full pipeline."""
@@ -165,14 +187,15 @@ class FlopClusterPipeline:
         self.log("Starting flop clustering pipeline")
         self.log(f"Parameters: K={self.k:,}, niter={self.niter}, threads={self.threads}")
 
-        all_cdfs  = self.step_compute_cdfs()
+        all_cdfs, all_ehs, all_mult = self.step_compute_data()
         centroids = self.step_train_centroids(all_cdfs)
-        self.step_assign_labels(all_cdfs, centroids)
+        self.step_assign_sort_remap(all_cdfs, all_ehs, all_mult, centroids)
 
         elapsed = time.time() - start
         self.log(f"==> Pipeline complete in {elapsed / 60:.1f} minutes")
         self.log(f"Centroids: {CENTROIDS_PATH}")
         self.log(f"Labels:    {LABELS_PATH}")
+        self.log(f"EHS fine:  {EHS_FINE_PATH}")
 
 
 def main():

@@ -5,8 +5,13 @@ Clustering pipeline for river equity states.
 Orchestrates the full K-means clustering workflow:
   1. Generate random sample indices
   2. Compute equity vectors for sampled indices
-  3. Train K-means centroids on the sample
-  4. Stream all states and assign cluster labels
+  3. Train K-means centroids on the sample (unsorted)
+  4. Stream all states: assign cluster labels + write river_ehs_fine.bin
+  5. Sort centroids by true multiplicity-weighted per-cluster EHS; remap labels
+
+Centroids are sorted by the multiplicity-weighted average EHS of their members,
+computed during the label-assignment streaming pass (step 4).  This is exact
+rather than an approximation from centroid means.
 
 GPU (FAISS) is required — CPU clustering is not supported.
 
@@ -29,19 +34,21 @@ from pathlib import Path
 import numpy as np
 
 import hand_indexer
-from river_clusterer import (assign_labels_streaming, gpu_available,
-                              sort_centroids_by_ehs, train_centroids)
+from river_clusterer import (assign_labels_and_ehs_fine_streaming, gpu_available,
+                              remap_labels_inplace, train_centroids)
 
 # ---------------------------------------------------------------------------
 # Fixed output paths
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR     = Path("clusters")
-INDICES_PATH   = OUTPUT_DIR / "river_sample_indices.bin"
-SAMPLE_PATH    = OUTPUT_DIR / "river_sample.npy"
-CENTROIDS_PATH = OUTPUT_DIR / "river_centroids.npy"
-EHS_PATH       = OUTPUT_DIR / "river_ehs.bin"
-LABELS_PATH    = OUTPUT_DIR / "river_labels.bin"
+OUTPUT_DIR          = Path("clusters")
+INDICES_PATH        = OUTPUT_DIR / "river_sample_indices.bin"
+SAMPLE_PATH         = OUTPUT_DIR / "river_sample.npy"
+CENTROIDS_PATH      = OUTPUT_DIR / "river_centroids.npy"
+EHS_PATH            = OUTPUT_DIR / "river_ehs.bin"
+EHS_FINE_PATH       = OUTPUT_DIR / "river_ehs_fine.bin"
+LABELS_PATH         = OUTPUT_DIR / "river_labels.bin"
+CLUSTER_EHS_PATH    = OUTPUT_DIR / "river_cluster_ehs_accum.npy"  # temp
 
 NUM_RIVER_STATES = 2_428_287_420
 
@@ -77,7 +84,7 @@ class ClusterPipeline:
             self.log("Indices already exist, skipping generation.")
             return
 
-        self.log(f"==> Step 1/4: Sampling {self.sample_size:,} indices...")
+        self.log(f"==> Step 1/5: Sampling {self.sample_size:,} indices...")
         t0 = time.time()
         rng = np.random.default_rng(self.seed)
         indices = np.sort(
@@ -94,7 +101,7 @@ class ClusterPipeline:
             self.log("Sample already exists, skipping computation.")
             return
 
-        self.log(f"==> Step 2/4: Computing equity vectors for "
+        self.log(f"==> Step 2/5: Computing equity vectors for "
                  f"{self.sample_size:,} samples...")
         self._set_thread_env()
         expander = hand_indexer.RiverExpander()
@@ -106,35 +113,60 @@ class ClusterPipeline:
                  f"({sample.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)")
 
     def step_train_centroids(self):
-        """Train K-means centroids on the saved sample."""
+        """Train K-means centroids on the saved sample (unsorted)."""
         if CENTROIDS_PATH.exists():
             self.log("Centroids already exist, skipping training.")
             return
 
-        self.log(f"==> Step 3/4: Training K={self.k:,} centroids "
+        self.log(f"==> Step 3/5: Training K={self.k:,} centroids "
                  f"({self.niter} iterations)...")
         sample = np.load(SAMPLE_PATH)
         centroids = train_centroids(sample, self.k, self.niter, self.seed)
-        centroids = sort_centroids_by_ehs(centroids)
-        ehs = (centroids.mean(axis=1) / 255.0).astype(np.float32)
-        ehs.tofile(EHS_PATH)
         np.save(CENTROIDS_PATH, centroids)
         self.log(f"  Centroids saved: {CENTROIDS_PATH}")
-        self.log(f"  EHS saved:       {EHS_PATH}")
 
-    def step_assign_labels(self):
-        """Stream all states and assign cluster labels."""
-        if LABELS_PATH.exists():
-            self.log("Labels already exist, skipping assignment.")
+    def step_assign_labels_and_ehs_fine(self):
+        """Stream all states: assign labels, write river_ehs_fine.bin, save per-cluster EHS."""
+        if LABELS_PATH.exists() and EHS_FINE_PATH.exists() and CLUSTER_EHS_PATH.exists():
+            self.log("Labels and EHS fine already exist, skipping assignment.")
             return
 
-        self.log("==> Step 4/4: Assigning labels to all states...")
+        self.log("==> Step 4/5: Assigning labels + writing river_ehs_fine.bin...")
         self._set_thread_env()
         expander  = hand_indexer.RiverExpander()
         centroids = np.load(CENTROIDS_PATH)
-        assign_labels_streaming(expander, centroids, str(LABELS_PATH),
-                                batch_size=1_000_000)
-        self.log(f"  Labels saved: {LABELS_PATH}")
+        per_cluster_ehs = assign_labels_and_ehs_fine_streaming(
+            expander, centroids,
+            str(LABELS_PATH), str(EHS_FINE_PATH),
+            batch_size=1_000_000)
+        np.save(CLUSTER_EHS_PATH, per_cluster_ehs)
+        self.log(f"  Labels saved:       {LABELS_PATH}")
+        self.log(f"  EHS fine saved:     {EHS_FINE_PATH}")
+        self.log(f"  Per-cluster EHS range: "
+                 f"[{per_cluster_ehs.min():.4f}, {per_cluster_ehs.max():.4f}]")
+
+    def step_sort_by_true_ehs(self):
+        """Sort centroids by weighted per-cluster EHS; remap labels; write river_ehs.bin."""
+        if EHS_PATH.exists():
+            self.log("EHS file already exists, skipping sort step.")
+            return
+
+        self.log("==> Step 5/5: Sorting by true EHS and remapping labels...")
+        centroids       = np.load(CENTROIDS_PATH)
+        per_cluster_ehs = np.load(CLUSTER_EHS_PATH)
+
+        sort_order = np.argsort(per_cluster_ehs)
+        centroids  = centroids[sort_order]
+        per_cluster_ehs[sort_order].astype(np.float32).tofile(EHS_PATH)
+        np.save(CENTROIDS_PATH, centroids)
+
+        self.log("  Remapping labels...")
+        remap_labels_inplace(str(LABELS_PATH), sort_order)
+
+        CLUSTER_EHS_PATH.unlink()
+        self.log(f"  Centroids saved: {CENTROIDS_PATH}")
+        self.log(f"  EHS saved:       {EHS_PATH}")
+        self.log(f"  Labels remapped: {LABELS_PATH}")
 
     def run(self):
         """Execute the full pipeline."""
@@ -148,7 +180,8 @@ class ClusterPipeline:
         self.step_generate_indices()
         self.step_compute_sample()
         self.step_train_centroids()
-        self.step_assign_labels()
+        self.step_assign_labels_and_ehs_fine()
+        self.step_sort_by_true_ehs()
 
         self.log("  Cleaning up intermediate sample files...")
         for path in (SAMPLE_PATH, INDICES_PATH):
@@ -160,6 +193,7 @@ class ClusterPipeline:
         self.log(f"==> Pipeline complete in {elapsed / 60:.1f} minutes")
         self.log(f"Centroids: {CENTROIDS_PATH}")
         self.log(f"Labels:    {LABELS_PATH}")
+        self.log(f"EHS fine:  {EHS_FINE_PATH}")
 
 
 def main():

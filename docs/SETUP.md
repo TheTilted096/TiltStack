@@ -64,10 +64,10 @@ make clean    # remove build artifacts
 ```
 
 This compiles the `hand_indexer` PyBind11 module, which wraps:
-- `RiverExpander` — equity vector computation via OMPEval
-- `TurnExpander` — wide-bucket histogram computation
-- `FlopExpander` — wide-bucket histogram computation
-- `RiverIndexer` — isomorphic hand indexing via hand-isomorphism
+- `RiverExpander` — equity vector + per-state EHS + multiplicity computation via OMPEval
+- `TurnExpander` — wide-bucket histogram + per-state EHS + multiplicity computation
+- `FlopExpander` — wide-bucket histogram + per-state EHS + multiplicity computation
+- `PreflopIndexer`, `RiverIndexer`, `TurnIndexer`, `FlopIndexer` — isomorphic hand indexing via hand-isomorphism
 
 ### 2. Run the Pipelines
 
@@ -87,6 +87,10 @@ python pysrc/turn_visualize_labels.py
 # Stage 3: Flop (1.29M states → 2,048 clusters)
 python pysrc/flop_cluster_pipeline.py
 python pysrc/flop_visualize_labels.py
+
+# Stage 4: Preflop (169 canonical classes → EHS values)
+python pysrc/preflop_ehs_pipeline.py
+python pysrc/preflop_ehs_visualize.py
 ```
 
 ### Pipeline Parameters
@@ -111,11 +115,12 @@ See [CLUSTERING.md](CLUSTERING.md) for full technical details on each stage.
 
 ### Resource Requirements
 
-| Stage | GPU VRAM | RAM | Approx. Runtime |
-|-------|:--------:|:---:|-----------------|
-| River | ~2 GB | ~4 GB | Several hours |
-| Turn | ~2 GB | ~8 GB (4.9 GB for river labels) | 1–2 hours |
-| Flop | ~1 GB | ~3 GB | < 30 minutes |
+| Stage | GPU VRAM | RAM |
+|-------|:--------:|:---:|
+| River | ~2 GB | ~6 GB |
+| Turn | ~2 GB | ~12 GB (river_labels + river_ehs_fine ≈ 9.8 GB) |
+| Flop | ~1 GB | ~3 GB |
+| Preflop | — | < 1 GB |
 
 ### Output
 
@@ -125,10 +130,17 @@ All output is written to `src/clusters/`:
 src/clusters/
 ├── river_centroids.npy     # 8192 × 169 float32
 ├── river_labels.bin        # 2.4B uint16 cluster assignments
+├── river_ehs_fine.bin      # 2.4B uint16 per-state EHS (/ 65535.0 to decode)
+├── river_ehs.bin           # 8192 float32 per-cluster EHS (sorted ascending)
 ├── turn_centroids.npy      # 8192 × 256 float32
 ├── turn_labels.bin         # ~55M uint16 cluster assignments
+├── turn_ehs_fine.bin       # ~55M uint16 per-state EHS
+├── turn_ehs.bin            # 8192 float32 per-cluster EHS (sorted ascending)
 ├── flop_centroids.npy      # 2048 × 256 float32
 ├── flop_labels.bin         # 1,286,792 uint16 cluster assignments
+├── flop_ehs_fine.bin       # 1,286,792 uint16 per-state EHS
+├── flop_ehs.bin            # 2048 float32 per-cluster EHS (sorted ascending)
+├── preflop_ehs_fine.bin    # 169 float32 per-class EHS
 └── *_viz.png               # Diagnostic plots (3 per stage)
 ```
 
