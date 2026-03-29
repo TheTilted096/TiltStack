@@ -138,7 +138,7 @@ class ClusterPipeline:
         per_cluster_ehs = assign_labels_and_ehs_fine_streaming(
             expander, centroids,
             str(LABELS_PATH), str(EHS_FINE_PATH),
-            batch_size=1_000_000)
+            batch_size=5_000_000)
         np.save(CLUSTER_EHS_PATH, per_cluster_ehs)
         self.log(f"  Labels saved:       {LABELS_PATH}")
         self.log(f"  EHS fine saved:     {EHS_FINE_PATH}")

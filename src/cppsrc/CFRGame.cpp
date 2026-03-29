@@ -1,7 +1,14 @@
 #include "CFRGame.h"
 
 CFRGame::CFRGame(){
+    uint8_t rounds[] = {2, 3, 1, 1};
+    hand_indexer_init(4, rounds, &indexer_);
+
     begin(STARTING_STACK, STARTING_STACK, 0);
+}
+
+CFRGame::~CFRGame(){
+    hand_indexer_free(&indexer_);
 }
 
 void CFRGame::begin(int ss1, int ss2, bool h){
@@ -38,15 +45,16 @@ void CFRGame::begin(int ss1, int ss2, bool h){
         std::swap(deck[i], deck[j]);
     }
 
-    std::memcpy(holeCards, deck, 4);
-    std::memcpy(board.data(), deck + 4, 5);
+    // deck[0..1] = p0 hole, deck[2..3] = p1 hole, deck[4..8] = board
+    for (int p = 0; p < 2; p++){
+        uint8_t cards[7] = { deck[p*2], deck[p*2+1],
+                             deck[4], deck[5], deck[6], deck[7], deck[8] };
+        hand_index_t indices[NUM_ROUNDS];
+        hand_index_all(&indexer_, cards, indices);
+        for (int r = 0; r < NUM_ROUNDS; r++)
+            streetIDs[r][p] = indices[r];
+    }
 
-    hole[0] = (1ULL << holeCards[0][0]) | (1ULL << holeCards[0][1]);
-    hole[1] = (1ULL << holeCards[1][0]) | (1ULL << holeCards[1][1]);
-
-    flop  = (1ULL << board[0]) | (1ULL << board[1]) | (1ULL << board[2]);
-    turn  = (1ULL << board[3]);
-    river = (1ULL << board[4]);
 }
 
 bool CFRGame::isFold(const Action& a){
@@ -164,15 +172,15 @@ float CFRGame::payout(){
         // Showdown: evaluate both 7-card hands (2 hole + 5 board).
         static omp::HandEvaluator evaluator;
 
+        uint8_t cards0[7], cards1[7];
+        hand_unindex(&indexer_, 3, streetIDs[3][0], cards0);
+        hand_unindex(&indexer_, 3, streetIDs[3][1], cards1);
+
         omp::Hand h0 = omp::Hand::empty();
-        h0 += omp::Hand(holeCards[0][0]);
-        h0 += omp::Hand(holeCards[0][1]);
         omp::Hand h1 = omp::Hand::empty();
-        h1 += omp::Hand(holeCards[1][0]);
-        h1 += omp::Hand(holeCards[1][1]);
-        for (int i = 0; i < 5; i++){
-            h0 += omp::Hand(board[i]);
-            h1 += omp::Hand(board[i]);
+        for (int i = 0; i < 7; i++){
+            h0 += omp::Hand(cards0[i]);
+            h1 += omp::Hand(cards1[i]);
         }
 
         uint16_t rank0 = evaluator.evaluate(h0);
@@ -267,10 +275,13 @@ InfoSet CFRGame::getInfo(){
 
     std::memcpy(info.betHist, betHist, sizeof(betHist));
 
-    info.hole  = hole[stm];
-    info.flop  = flop  * (currentRound >= Round::FLOP);
-    info.turn  = turn  * (currentRound >= Round::TURN);
-    info.river = river * (currentRound >= Round::RIVER);
+    uint8_t canonical[7] = {};
+    hand_unindex(&indexer_, roundNum, streetIDs[roundNum][stm], canonical);
+
+    info.hole  = (1ULL << canonical[0]) | (1ULL << canonical[1]);
+    info.flop  = ((1ULL << canonical[2]) | (1ULL << canonical[3]) | (1ULL << canonical[4])) * (currentRound >= Round::FLOP);
+    info.turn  = (1ULL << canonical[5]) * (currentRound >= Round::TURN);
+    info.river = (1ULL << canonical[6]) * (currentRound >= Round::RIVER);
 
     // One-hot encode current round
     info.streetEmbed.fill(false);

@@ -1,8 +1,10 @@
 #include "CFRTypes.h"
-// Include OMPEval before deck.h: deck.h defines CARDS/RANKS/SUITS macros that
-// collide with OMPEval identifiers.
+// Include OMPEval before hand-isomorphism: deck.h defines CARDS/RANKS/SUITS
+// macros that collide with OMPEval identifiers.
 #include "../third_party/OMPEval/HandEvaluator.h"
-#include "../third_party/hand-isomorphism/deck.h"
+extern "C" {
+#include "../third_party/hand-isomorphism/hand_index.h"
+}
 
 // Shared xorshift64* PRNG — one instance across all CFRGame objects that use it.
 // Not all CFRGame objects need to share this; callers may seed or bypass it as needed.
@@ -18,7 +20,6 @@ inline uint64_t fastRand(){
 class CFRGame{
     public:
         std::array<BoardState, MAX_ACTIONS * NUM_ROUNDS + 1> history;
-        uint64_t hole[2], flop, turn, river;
 
         int ply;
 
@@ -28,16 +29,17 @@ class CFRGame{
         bool hero;
         int isTerminal;
 
-        std::array<Card, 5> board; // pre-deal all 5 cards
-        Card holeCards[2][2]; // deal hole cards
-
         std::array<uint8_t, NUM_ROUNDS + 1> actionCount;
         Round currentRound;
 
-        float betHist[NUM_ROUNDS][MAX_ACTIONS]; 
-        std::array<int16_t, NUM_ROUNDS - 1> streetBucket; 
+        float betHist[NUM_ROUNDS][MAX_ACTIONS];
+        std::array<int16_t, NUM_ROUNDS> streetBucket;
+        hand_index_t streetIDs[NUM_ROUNDS][2];
+
+        hand_indexer_t indexer_; // 4-round {2,3,1,1} indexer, initialized in CFRGame()
 
         CFRGame();
+        ~CFRGame();
 
         void begin(int, int, bool);
 
