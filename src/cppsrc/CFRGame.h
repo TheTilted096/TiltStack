@@ -22,7 +22,8 @@ class CFRGame{
         Round currentRound;
 
         float betHist[NUM_ROUNDS][MAX_ACTIONS];
-        std::array<int16_t, NUM_ROUNDS> streetBucket;
+        uint16_t streetBucket[NUM_ROUNDS][2];
+        float streetEHS[NUM_ROUNDS][2];
         hand_index_t streetIDs[NUM_ROUNDS][2];
 
         hand_indexer_t indexer; // 4-round {2,3,1,1} indexer, initialized in CFRGame()

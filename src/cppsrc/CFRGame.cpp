@@ -18,7 +18,6 @@ void CFRGame::begin(int ss1, int ss2, bool h){
     isTerminal = false;
     actionCount.fill(0);
     currentRound = Round::PREFLOP;
-    streetBucket.fill(0);
 
     std::fill(&betHist[0][0], &betHist[0][0] + sizeof(betHist) / sizeof(float), -1.0f);
 
@@ -32,8 +31,6 @@ void CFRGame::begin(int ss1, int ss2, bool h){
     history[0].stm = 0; // little blind
 
     history[0].act = Action::BET50; // big blind does a half pot bet to start
-
-    if (!gEHS[0].empty()) history[0].ehs = gEHS[0][streetIDs[0][0]] / 65535.0f;
 
     // Partial Fisher-Yates: pick 9 unique cards from the 52-card deck.
     Card deck[CARDS];
@@ -53,6 +50,14 @@ void CFRGame::begin(int ss1, int ss2, bool h){
         hand_index_all(&indexer, cards, indices);
         for (int r = 0; r < NUM_ROUNDS; r++)
             streetIDs[r][p] = indices[r];
+    }
+
+    // Cards are fully dealt: precompute EHS and bucket for every street and player.
+    for (int r = 0; r < NUM_ROUNDS; r++) {
+        for (int p = 0; p < 2; p++) {
+            streetEHS[r][p]    = gEHS[r][streetIDs[r][p]] / 65535.0f;
+            streetBucket[r][p] = gLabels[r][streetIDs[r][p]];
+        }
     }
 
 }
@@ -134,16 +139,8 @@ void CFRGame::makeMove(const Action& a){
     betHist[roundNum][numActs] = static_cast<float>(now.toCall) / (last.pot + last.toCall);
 
     currentRound = static_cast<Round>(roundNum + streetEnded);
-    //streetBucket[roundNum + streetEnded]; // TODO: LOOKUP BUCKET 
 
     now.stm = streetEnded or !last.stm;
-    if (streetEnded && roundNum + 1 < NUM_ROUNDS) {
-        int next = roundNum + 1;
-        now.ehs          = gEHS[next][streetIDs[next][now.stm]] / 65535.0f;
-        streetBucket[next] = gLabels[next][streetIDs[next][now.stm]]; // TODO: LOOKUP BUCKET
-    } else {
-        now.ehs = last.ehs;
-    }
 }
 
 void CFRGame::unmakeMove(){
@@ -276,7 +273,7 @@ InfoSet CFRGame::getInfo(){
     info.oppStack = static_cast<float>(stacks[!stm]) / effStack;
     info.potSize  = static_cast<float>(cur.pot)      / effStack;
     info.toCall   = static_cast<float>(cur.toCall)   / effStack;
-    info.currentEHS = cur.ehs;
+    info.currentEHS = streetEHS[roundNum][stm];
 
     std::memcpy(info.betHist, betHist, sizeof(betHist));
 
@@ -294,7 +291,7 @@ InfoSet CFRGame::getInfo(){
     info.isButton = (stm == 0);
 
     for (int i = 0; i < NUM_ROUNDS - 1; i++){
-        info.streetBucket[i] = streetBucket[i];
+        info.streetBucket[i] = streetBucket[i][stm];
     }
 
     return info;

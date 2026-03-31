@@ -55,7 +55,6 @@ struct InfoSet{
 struct BoardState{
     int pot;
     int toCall;
-    float ehs;
     bool stm;
     Action act;
 };
