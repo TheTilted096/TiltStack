@@ -31,7 +31,7 @@ class CFRGame{
         CFRGame();
         ~CFRGame();
 
-        void begin(int, int, bool);
+        void begin(int, int, bool, RNG&);
 
         int isTerminalState(const Action&);
         bool isFold(const Action&);

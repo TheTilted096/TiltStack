@@ -1,26 +1,9 @@
-#include "CFRGame.h"
+#include "DeepCFR.h"
 
-// ---------------------------------------------------------------------------
-// Replay buffers — populated during deepcfr traversals.
-// Cleared and consumed by the Python training loop between CFR iterations.
-// ---------------------------------------------------------------------------
-
-std::vector<InfoSet> advantageInput;
-std::vector<Regrets>  advantageOutput;
-
-std::vector<InfoSet>  policyInput;
-std::vector<Strategy> policyOutput;
-
-// ---------------------------------------------------------------------------
-// Regret matching over the legal action subset only.
-// Illegal actions stay at 0 probability so indexing by Action cast is safe.
-// ---------------------------------------------------------------------------
-
-Action sampleAction(const Strategy& strat, const ActionList& moves, int numMoves){
-    float sample = (fastRand() >> 40) * 0x1.0p-24f;
-
+Action DeepCFR::sampleAction(const Strategy& strat, const ActionList& moves, int numMoves) {
+    float sample = rng.nextFloat();
     float cumulative = 0.0f;
-    for (int i = 0; i < numMoves; i++){
+    for (int i = 0; i < numMoves; i++) {
         cumulative += strat[static_cast<int>(moves[i])];
         if (sample < cumulative)
             return moves[i];
@@ -28,17 +11,17 @@ Action sampleAction(const Strategy& strat, const ActionList& moves, int numMoves
     return moves[numMoves - 1];
 }
 
-Strategy getInstantStrat(const Regrets& r, const ActionList& moves, int numMoves){
+Strategy DeepCFR::getInstantStrat(const Regrets& r, const ActionList& moves, int numMoves) {
     Strategy s{};
     float sum = 0.0f;
 
-    for (int i = 0; i < numMoves; i++){
+    for (int i = 0; i < numMoves; i++) {
         int a = static_cast<int>(moves[i]);
         s[a] = std::max(0.0f, r[a]);
         sum += s[a];
     }
 
-    if (sum > 0.0f){
+    if (sum > 0.0f) {
         for (int i = 0; i < numMoves; i++)
             s[static_cast<int>(moves[i])] /= sum;
     } else {
@@ -50,58 +33,52 @@ Strategy getInstantStrat(const Regrets& r, const ActionList& moves, int numMoves
     return s;
 }
 
-float deepcfr(CFRGame& game, bool hero){
-    if (game.isTerminal){
-        return game.payout();
-    }
+// ---------------------------------------------------------------------------
+
+Task<float> DeepCFR::rollout(bool hero, int t, Scheduler& sched) {
+    if (game.isTerminal)
+        co_return game.payout();
 
     ActionList moves;
     int numMoves = game.generateActions(moves);
 
-    // inference the regret network here
-    Regrets predictedRegrets{};
-    // TODO: call regret network with game.getInfo() to fill predictedRegrets
+    Regrets predictedRegrets = co_await InferenceAwaitable{game.getInfo(), sched};
+    Strategy instantStrategy  = getInstantStrat(predictedRegrets, moves, numMoves);
 
-    Strategy instantStrategy = getInstantStrat(predictedRegrets, moves, numMoves);
+    float nodeEV = 0.0f;
 
-    float nodeEV = 0.0;
-
-    if (game.stm() == hero){
+    if (game.stm() == hero) {
         Regrets trueRegret{};
         std::array<float, NUM_ACTIONS> actionUtils{};
 
-        for (int i = 0; i < numMoves; i++){
-            game.makeMove(moves[i]);
-
+        for (int i = 0; i < numMoves; i++) {
             int actionInt = static_cast<int>(moves[i]);
-
-            actionUtils[actionInt] = deepcfr(game, hero);
-
+            game.makeMove(moves[i]);
+            actionUtils[actionInt] = co_await rollout(hero, t, sched);
             game.unmakeMove();
-
             nodeEV += instantStrategy[actionInt] * actionUtils[actionInt];
         }
 
         float pot = static_cast<float>(game.history[game.ply].pot);
-        for (int j = 0; j < numMoves; j++){
+        for (int j = 0; j < numMoves; j++) {
             int actionInt = static_cast<int>(moves[j]);
-            trueRegret[actionInt] = (actionUtils[actionInt] - nodeEV) / pot;
+            trueRegret[actionInt] = (actionUtils[actionInt] - nodeEV) / (pot + static_cast<float>(BIG_BLIND));
         }
 
-        advantageInput.push_back(game.getInfo());
-        advantageOutput.push_back(trueRegret);
+        sched.advantageInputs.push_back(game.getInfo());
+        sched.advantageOutputs.push_back(trueRegret);
 
-        return nodeEV;
+        co_return nodeEV;
     }
 
-    policyInput.push_back(game.getInfo());
-    policyOutput.push_back(instantStrategy);
+    sched.policyInputs.push_back(game.getInfo());
+    sched.policyOutputs.push_back(instantStrategy);
+    sched.policyWeights.push_back(t);
 
     Action villainMove = sampleAction(instantStrategy, moves, numMoves);
-
     game.makeMove(villainMove);
-    nodeEV = deepcfr(game, hero);
+    nodeEV = co_await rollout(hero, t, sched);
     game.unmakeMove();
 
-    return nodeEV;
+    co_return nodeEV;
 }

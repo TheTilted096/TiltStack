@@ -38,7 +38,7 @@ void CFRGame::begin(int ss1, int ss2, bool h){
         deck[i] = static_cast<Card>(i);
     }
     for (int i = 0; i < 9; i++){
-        int j = i + static_cast<int>(fastRand() % static_cast<uint64_t>(CARDS - i));
+        int j = i + static_cast<int>(rng.next() % static_cast<uint64_t>(CARDS - i));
         std::swap(deck[i], deck[j]);
     }
 

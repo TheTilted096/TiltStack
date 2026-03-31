@@ -6,18 +6,30 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// PRNG — xorshift64*, shared across all CFRGame instances.
-// Seed rngState before training begins.
+// PRNG — xorshift64*.
+// One instance per thread, shared by CFRGame and DeepCFR.
+// Seed rng before training begins.
 // ---------------------------------------------------------------------------
 
-inline uint64_t rngState = 0xdeadbeefcafe1234ULL;
+class RNG {
+    uint64_t state_;
+public:
+    explicit RNG(uint64_t seed = 0xdeadbeefcafe1234ULL) : state_(seed) {}
 
-inline uint64_t fastRand() {
-    rngState ^= rngState >> 12;
-    rngState ^= rngState << 25;
-    rngState ^= rngState >> 27;
-    return rngState * 0x2545F4914F6CDD1DULL;
-}
+    void seed(uint64_t s) { state_ = s; }
+
+    uint64_t next() {
+        state_ ^= state_ >> 12;
+        state_ ^= state_ << 25;
+        state_ ^= state_ >> 27;
+        return state_ * 0x2545F4914F6CDD1DULL;
+    }
+
+    // Returns a float in [0, 1).
+    float nextFloat() { return (next() >> 40) * 0x1.0p-24f; }
+};
+
+inline thread_local RNG rng;
 
 // ---------------------------------------------------------------------------
 // Cluster tables — populate before constructing any CFRGame.
