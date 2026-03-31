@@ -38,13 +38,13 @@ _SUIT_CHARS = "cdhs"
 # ---------------------------------------------------------------------------
 
 def load_ehs(path: str) -> np.ndarray:
-    """Load 169 float32 EHS values from binary file."""
+    """Load 169 uint16-quantized EHS values from binary file and decode to float32."""
     if not os.path.isfile(path):
         sys.exit(
             f"Error: EHS file not found: {path}\n"
             "Run preflop_ehs_pipeline.py first."
         )
-    data = np.fromfile(path, dtype=np.float32)
+    data = np.fromfile(path, dtype=np.uint16).astype(np.float32) / 65535.0
     if len(data) != NUM_HANDS:
         sys.exit(f"Error: expected {NUM_HANDS} values, got {len(data)}")
     return data

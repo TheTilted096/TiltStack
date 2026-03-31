@@ -13,7 +13,7 @@ Algorithm:
   of concrete deals it represents (which is proportional to its multiplicity).
 
 Output:
-  clusters/preflop_ehs_fine.bin — 169 × float32 (~676 B)
+  clusters/preflop_ehs_fine.bin — 169 × uint16 (~338 B)
 
 Requires:
   clusters/flop_ehs_fine.bin from the flop clustering pipeline.
@@ -129,7 +129,7 @@ def main():
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ehs = compute_preflop_ehs(verbose=verbose)
-    ehs.tofile(PREFLOP_EHS_PATH)
+    np.rint(ehs * 65535.0).astype(np.uint16).tofile(PREFLOP_EHS_PATH)
 
     if verbose:
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "

@@ -1,14 +1,14 @@
 #include "CFRGame.h"
 
-CFRGame::CFRGame(){
+CFRGame::CFRGame() {
     uint8_t rounds[] = {2, 3, 1, 1};
-    hand_indexer_init(4, rounds, &indexer_);
+    hand_indexer_init(4, rounds, &indexer);
 
     begin(STARTING_STACK, STARTING_STACK, 0);
 }
 
 CFRGame::~CFRGame(){
-    hand_indexer_free(&indexer_);
+    hand_indexer_free(&indexer);
 }
 
 void CFRGame::begin(int ss1, int ss2, bool h){
@@ -33,7 +33,7 @@ void CFRGame::begin(int ss1, int ss2, bool h){
 
     history[0].act = Action::BET50; // big blind does a half pot bet to start
 
-    history[0].ehs = 0.0; // TODO: LOOKUP
+    if (!gEHS[0].empty()) history[0].ehs = gEHS[0][streetIDs[0][0]] / 65535.0f;
 
     // Partial Fisher-Yates: pick 9 unique cards from the 52-card deck.
     Card deck[CARDS];
@@ -50,7 +50,7 @@ void CFRGame::begin(int ss1, int ss2, bool h){
         uint8_t cards[7] = { deck[p*2], deck[p*2+1],
                              deck[4], deck[5], deck[6], deck[7], deck[8] };
         hand_index_t indices[NUM_ROUNDS];
-        hand_index_all(&indexer_, cards, indices);
+        hand_index_all(&indexer, cards, indices);
         for (int r = 0; r < NUM_ROUNDS; r++)
             streetIDs[r][p] = indices[r];
     }
@@ -123,8 +123,6 @@ void CFRGame::makeMove(const Action& a){
     BoardState& now = history[ply];
 
     now.act = a;
-    now.ehs; // TODO: LOOKUP
-
     now.pot = last.pot + bet;
     now.toCall = bet - last.toCall;
     stacks[last.stm] -= bet;
@@ -139,6 +137,13 @@ void CFRGame::makeMove(const Action& a){
     //streetBucket[roundNum + streetEnded]; // TODO: LOOKUP BUCKET 
 
     now.stm = streetEnded or !last.stm;
+    if (streetEnded && roundNum + 1 < NUM_ROUNDS) {
+        int next = roundNum + 1;
+        now.ehs          = gEHS[next][streetIDs[next][now.stm]] / 65535.0f;
+        streetBucket[next] = gLabels[next][streetIDs[next][now.stm]]; // TODO: LOOKUP BUCKET
+    } else {
+        now.ehs = last.ehs;
+    }
 }
 
 void CFRGame::unmakeMove(){
@@ -173,8 +178,8 @@ float CFRGame::payout(){
         static omp::HandEvaluator evaluator;
 
         uint8_t cards0[7], cards1[7];
-        hand_unindex(&indexer_, 3, streetIDs[3][0], cards0);
-        hand_unindex(&indexer_, 3, streetIDs[3][1], cards1);
+        hand_unindex(&indexer, 3, streetIDs[3][0], cards0);
+        hand_unindex(&indexer, 3, streetIDs[3][1], cards1);
 
         omp::Hand h0 = omp::Hand::empty();
         omp::Hand h1 = omp::Hand::empty();
@@ -276,7 +281,7 @@ InfoSet CFRGame::getInfo(){
     std::memcpy(info.betHist, betHist, sizeof(betHist));
 
     uint8_t canonical[7] = {};
-    hand_unindex(&indexer_, roundNum, streetIDs[roundNum][stm], canonical);
+    hand_unindex(&indexer, roundNum, streetIDs[roundNum][stm], canonical);
 
     info.hole  = (1ULL << canonical[0]) | (1ULL << canonical[1]);
     info.flop  = ((1ULL << canonical[2]) | (1ULL << canonical[3]) | (1ULL << canonical[4])) * (currentRound >= Round::FLOP);
