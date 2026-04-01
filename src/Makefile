@@ -67,6 +67,10 @@ test: | build
 build:
 	$(MKDIR_BUILD)
 
+tidy:
+	find . -name "*.h" -exec clang-format -i -style="{BasedOnStyle: llvm, IndentWidth: 4}" {} +
+	find . -name "*.cpp" -exec clang-format -i -style="{BasedOnStyle: llvm, IndentWidth: 4}" {} +
+
 # ---- Clean targets ---------------------------------------------------------
 
 ifeq ($(OS),Windows_NT)
