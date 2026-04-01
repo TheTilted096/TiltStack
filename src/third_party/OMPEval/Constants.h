@@ -26,6 +26,6 @@ static const unsigned FULL_HOUSE = 7 * HAND_CATEGORY_OFFSET;
 static const unsigned FOUR_OF_A_KIND = 8 * HAND_CATEGORY_OFFSET;
 static const unsigned STRAIGHT_FLUSH = 9 * HAND_CATEGORY_OFFSET;
 
-}
+} // namespace omp
 
 #endif // OMP_CONSTANTS_H

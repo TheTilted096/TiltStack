@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Coroutine.h"
 #include "CFRTypes.h"
+#include "Coroutine.h"
 #include "InferenceQueue.h"
 
 #include <condition_variable>
@@ -18,14 +18,15 @@ using Handle = std::coroutine_handle<>;
 //
 // Synchronisation with the Python main thread:
 //   C++ calls flushBatch()  → pushes this to inferenceQueue, then blocks
-//   Python calls pop()      → wakes, wraps pendingInputs/pendingOutputs as tensors, runs network
-//   Python calls submitBatch() → results written into pendingOutputs, notifies cv
-//   C++ wakes, pushes all pending handles to ready, coroutines resume and read pendingOutputs[index]
+//   Python calls pop()      → wakes, wraps pendingInputs/pendingOutputs as
+//   tensors, runs network Python calls submitBatch() → results written into
+//   pendingOutputs, notifies cv C++ wakes, pushes all pending handles to ready,
+//   coroutines resume and read pendingOutputs[index]
 // ---------------------------------------------------------------------------
 
 class Scheduler {
     // ---- Shared inference notification channel ------------------------------
-    InferenceQueue& inferenceQueue;
+    InferenceQueue &inferenceQueue;
 
     // ---- Coroutine queues ---------------------------------------------------
     std::queue<Handle> ready;
@@ -34,33 +35,34 @@ class Scheduler {
     // pendingInputs / pendingOutputs are contiguous so they can be wrapped as
     // flat PyTorch tensors without copying. Each awaitable stores its index and
     // reads pendingOutputs[index] directly in await_resume() via friend access.
-    std::vector<InfoSet>  pendingInputs;
-    std::vector<Regrets>  pendingOutputs;
-    std::vector<Handle>   pendingHandles;
+    std::vector<InfoSet> pendingInputs;
+    std::vector<Regrets> pendingOutputs;
+    std::vector<Handle> pendingHandles;
 
     // ---- Root task ownership ------------------------------------------------
     std::vector<Task<float>> tasks;
 
     // ---- Batch synchronisation with Python ----------------------------------
-    std::mutex              batchMutex;
+    std::mutex batchMutex;
     std::condition_variable cv;
-    bool batchComplete = false;   // Python → C++: results written to pendingOutputs
+    bool batchComplete =
+        false; // Python → C++: results written to pendingOutputs
 
     // ---- Internal -----------------------------------------------------------
     void flushBatch();
 
     friend struct InferenceAwaitable;
 
-public:
-    explicit Scheduler(InferenceQueue& q) : inferenceQueue(q) {}
+  public:
+    explicit Scheduler(InferenceQueue &q) : inferenceQueue(q) {}
 
     // ---- Replay buffers — appended to by DeepCFR::rollout() -----------------
-    std::vector<InfoSet>  advantageInputs;
-    std::vector<Regrets>  advantageOutputs;
+    std::vector<InfoSet> advantageInputs;
+    std::vector<Regrets> advantageOutputs;
 
-    std::vector<InfoSet>   policyInputs;
-    std::vector<Strategy>  policyOutputs;
-    std::vector<int>  policyWeights;
+    std::vector<InfoSet> policyInputs;
+    std::vector<Strategy> policyOutputs;
+    std::vector<int> policyWeights;
 
     // ---- C++ interface ------------------------------------------------------
 
@@ -74,7 +76,7 @@ public:
     void submitBatch();
 
     // Raw pointers for zero-copy numpy / torch tensor construction.
-    InfoSet* inputData()  { return pendingInputs.data(); }
-    Regrets* outputData() { return pendingOutputs.data(); }
-    int      batchSize()  { return static_cast<int>(pendingHandles.size()); }
+    InfoSet *inputData() { return pendingInputs.data(); }
+    Regrets *outputData() { return pendingOutputs.data(); }
+    int batchSize() { return static_cast<int>(pendingHandles.size()); }
 };

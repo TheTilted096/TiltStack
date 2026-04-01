@@ -14,23 +14,26 @@ class Scheduler;
 // ---------------------------------------------------------------------------
 
 class InferenceQueue {
-    std::mutex              mtx;
+    std::mutex mtx;
     std::condition_variable cv;
-    std::queue<Scheduler*>  ready;
+    std::queue<Scheduler *> ready;
 
-public:
+  public:
     // Called by a worker thread inside flushBatch() when its batch is full.
-    void push(Scheduler* s) {
-        { std::unique_lock lock(mtx); ready.push(s); }
+    void push(Scheduler *s) {
+        {
+            std::unique_lock lock(mtx);
+            ready.push(s);
+        }
         cv.notify_one();
     }
 
     // Called by the Python main thread. Sleeps until any worker is ready,
     // then returns a pointer to that worker's Scheduler.
-    Scheduler* pop() {
+    Scheduler *pop() {
         std::unique_lock lock(mtx);
         cv.wait(lock, [this] { return !ready.empty(); });
-        Scheduler* s = ready.front();
+        Scheduler *s = ready.front();
         ready.pop();
         return s;
     }
