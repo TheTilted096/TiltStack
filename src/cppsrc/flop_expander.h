@@ -37,27 +37,28 @@ extern "C" {
 #include <vector>
 
 class FlopExpander {
-    static constexpr int NUM_WIDE_BUCKETS = 256;  // 8192 fine turn buckets / 32
-    static constexpr int FINE_PER_WIDE    = 32;
-    static constexpr int NUM_CARDS        = 52;
+    static constexpr int NUM_WIDE_BUCKETS = 256; // 8192 fine turn buckets / 32
+    static constexpr int FINE_PER_WIDE = 32;
+    static constexpr int NUM_CARDS = 52;
 
-    hand_indexer_t flop_indexer_;    // rounds [2, 3]    → 5-card canonical states
-    hand_indexer_t turn_indexer_;    // rounds [2, 3, 1] → 6-card canonical states
+    hand_indexer_t flop_indexer_; // rounds [2, 3]    → 5-card canonical states
+    hand_indexer_t turn_indexer_; // rounds [2, 3, 1] → 6-card canonical states
 
-    std::vector<uint16_t> turn_labels_;    // loaded from turn_labels.bin
-    std::vector<uint16_t> turn_ehs_fine_;  // loaded from turn_ehs_fine.bin; decode: value / 65535.0f
+    std::vector<uint16_t> turn_labels_;   // loaded from turn_labels.bin
+    std::vector<uint16_t> turn_ehs_fine_; // loaded from turn_ehs_fine.bin;
+                                          // decode: value / 65535.0f
 
-    void computeRowEhsMult(hand_index_t flop_idx, uint8_t* row,
-                           float* ehs_out, uint8_t* mult_out) const;
+    void computeRowEhsMult(hand_index_t flop_idx, uint8_t *row, float *ehs_out,
+                           uint8_t *mult_out) const;
     uint8_t computeMult(hand_index_t flop_idx) const;
 
-public:
+  public:
     static constexpr int DIMS = NUM_WIDE_BUCKETS;
 
     // Both files are required and loaded fully into RAM on construction
     // (~110 MB for turn_labels, ~110 MB for turn_ehs_fine).
-    explicit FlopExpander(const std::string& turn_labels_path,
-                          const std::string& turn_ehs_fine_path);
+    explicit FlopExpander(const std::string &turn_labels_path,
+                          const std::string &turn_ehs_fine_path);
     ~FlopExpander();
 
     // Total number of canonical flop states (hand_indexer_size at round 1).
@@ -68,7 +69,7 @@ public:
     // row_out:  n * DIMS uint8 bytes
     // ehs_out:  n floats  (already in [0, 1])
     // mult_out: n uint8 bytes  (suit-isomorphism multiplicities in [1, 24])
-    void compute_rows_ehs_mult(const uint64_t* indices, size_t n,
-                               uint8_t* row_out, float* ehs_out,
-                               uint8_t* mult_out) const;
+    void compute_rows_ehs_mult(const uint64_t *indices, size_t n,
+                               uint8_t *row_out, float *ehs_out,
+                               uint8_t *mult_out) const;
 };

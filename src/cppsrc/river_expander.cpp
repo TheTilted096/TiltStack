@@ -36,15 +36,13 @@ RiverExpander::RiverExpander() {
     hand_indexer_free(&preflop);
 }
 
-RiverExpander::~RiverExpander() {
-    hand_indexer_free(&river_indexer_);
-}
+RiverExpander::~RiverExpander() { hand_indexer_free(&river_indexer_); }
 
 // ---------------------------------------------------------------------------
 // Core computation
 // ---------------------------------------------------------------------------
 
-void RiverExpander::computeRow(hand_index_t idx, uint8_t* row) const {
+void RiverExpander::computeRow(hand_index_t idx, uint8_t *row) const {
     uint8_t cards[7];
     hand_unindex(&river_indexer_, 3, idx, cards);
 
@@ -62,25 +60,29 @@ void RiverExpander::computeRow(hand_index_t idx, uint8_t* row) const {
         board += card_hands_[cards[c]];
 
     std::array<float, NUM_BUCKETS> eqSum = {};
-    std::array<int,   NUM_BUCKETS> count = {};
+    std::array<int, NUM_BUCKETS> count = {};
 
     for (uint8_t c0 = 0; c0 < NUM_CARDS - 1; c0++) {
-        if ((usedMask >> c0) & 1) continue;
+        if ((usedMask >> c0) & 1)
+            continue;
         for (uint8_t c1 = c0 + 1; c1 < NUM_CARDS; c1++) {
-            if ((usedMask >> c1) & 1) continue;
+            if ((usedMask >> c1) & 1)
+                continue;
 
             hand_index_t bucket = bucket_of_[c0][c1];
             omp::Hand oppHand = board + card_hands_[c0] + card_hands_[c1];
             uint16_t oppRank = evaluator_.evaluate(oppHand);
 
-            if (heroRank > oppRank)       eqSum[bucket] += 1.0f;
-            else if (heroRank == oppRank) eqSum[bucket] += 0.5f;
+            if (heroRank > oppRank)
+                eqSum[bucket] += 1.0f;
+            else if (heroRank == oppRank)
+                eqSum[bucket] += 0.5f;
             count[bucket]++;
         }
     }
 
     float totalEqSum = 0.0f;
-    int   totalCount = 0;
+    int totalCount = 0;
     for (int bi = 0; bi < NUM_BUCKETS; bi++) {
         totalEqSum += eqSum[bi];
         totalCount += count[bi];
@@ -93,8 +95,8 @@ void RiverExpander::computeRow(hand_index_t idx, uint8_t* row) const {
     }
 }
 
-void RiverExpander::computeRowEhsMult(hand_index_t idx, uint8_t* row,
-                                      float* ehs_out, uint8_t* mult_out) const {
+void RiverExpander::computeRowEhsMult(hand_index_t idx, uint8_t *row,
+                                      float *ehs_out, uint8_t *mult_out) const {
     uint8_t cards[7];
     hand_unindex(&river_indexer_, 3, idx, cards);
 
@@ -112,25 +114,29 @@ void RiverExpander::computeRowEhsMult(hand_index_t idx, uint8_t* row,
         board += card_hands_[cards[c]];
 
     std::array<float, NUM_BUCKETS> eqSum = {};
-    std::array<int,   NUM_BUCKETS> count = {};
+    std::array<int, NUM_BUCKETS> count = {};
 
     for (uint8_t c0 = 0; c0 < NUM_CARDS - 1; c0++) {
-        if ((usedMask >> c0) & 1) continue;
+        if ((usedMask >> c0) & 1)
+            continue;
         for (uint8_t c1 = c0 + 1; c1 < NUM_CARDS; c1++) {
-            if ((usedMask >> c1) & 1) continue;
+            if ((usedMask >> c1) & 1)
+                continue;
 
             hand_index_t bucket = bucket_of_[c0][c1];
             omp::Hand oppHand = board + card_hands_[c0] + card_hands_[c1];
             uint16_t oppRank = evaluator_.evaluate(oppHand);
 
-            if (heroRank > oppRank)       eqSum[bucket] += 1.0f;
-            else if (heroRank == oppRank) eqSum[bucket] += 0.5f;
+            if (heroRank > oppRank)
+                eqSum[bucket] += 1.0f;
+            else if (heroRank == oppRank)
+                eqSum[bucket] += 0.5f;
             count[bucket]++;
         }
     }
 
     float totalEqSum = 0.0f;
-    int   totalCount = 0;
+    int totalCount = 0;
     for (int bi = 0; bi < NUM_BUCKETS; bi++) {
         totalEqSum += eqSum[bi];
         totalCount += count[bi];
@@ -150,20 +156,20 @@ void RiverExpander::computeRowEhsMult(hand_index_t idx, uint8_t* row,
 // Public compute methods
 // ---------------------------------------------------------------------------
 
-void RiverExpander::compute_rows(const uint64_t* indices, size_t n,
-                                 uint8_t* out) const {
-    #pragma omp parallel for schedule(dynamic, 1024)
+void RiverExpander::compute_rows(const uint64_t *indices, size_t n,
+                                 uint8_t *out) const {
+#pragma omp parallel for schedule(dynamic, 1024)
     for (ptrdiff_t i = 0; i < (ptrdiff_t)n; i++)
         computeRow(indices[i], out + i * DIMS);
 }
 
 void RiverExpander::compute_range_ehs_mult(uint64_t start, int n,
-                                           uint8_t* row_out, float* ehs_out,
-                                           uint8_t* mult_out) const {
-    #pragma omp parallel for schedule(dynamic, 1024)
+                                           uint8_t *row_out, float *ehs_out,
+                                           uint8_t *mult_out) const {
+#pragma omp parallel for schedule(dynamic, 1024)
     for (int i = 0; i < n; i++)
-        computeRowEhsMult(start + i, row_out + i * DIMS,
-                          ehs_out + i, mult_out + i);
+        computeRowEhsMult(start + i, row_out + i * DIMS, ehs_out + i,
+                          mult_out + i);
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +182,7 @@ void RiverExpander::compute_range_ehs_mult(uint64_t start, int n,
 uint8_t RiverExpander::computeMult(hand_index_t idx) const {
     // Binary-search for the configuration that owns this index (same logic
     // as the start of hand_unindex).
-    const uint_fast32_t round = 3;  // river is round index 3
+    const uint_fast32_t round = 3; // river is round index 3
     uint_fast32_t low = 0, high = river_indexer_.configurations[round];
     uint_fast32_t cfg = 0;
     while (low < high) {
@@ -190,7 +196,8 @@ uint8_t RiverExpander::computeMult(hand_index_t idx) const {
     }
 
     // equal_mask: bit (j-1) is set iff suit j is interchangeable with suit j-1.
-    const uint_fast32_t equal_mask = river_indexer_.configuration_to_equal[round][cfg];
+    const uint_fast32_t equal_mask =
+        river_indexer_.configuration_to_equal[round][cfg];
 
     static const uint8_t fact[5] = {1, 1, 2, 6, 24};
     int denom = 1, gsz = 1;

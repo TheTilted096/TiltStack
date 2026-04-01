@@ -30,21 +30,21 @@ extern "C" {
 
 class RiverExpander {
     static constexpr int NUM_BUCKETS = 169;
-    static constexpr int NUM_CARDS   = 52;
+    static constexpr int NUM_CARDS = 52;
 
     hand_indexer_t river_indexer_;
     omp::HandEvaluator evaluator_;
     std::array<omp::Hand, NUM_CARDS> card_hands_;
     std::array<std::array<hand_index_t, NUM_CARDS>, NUM_CARDS> bucket_of_;
 
-    void computeRow(hand_index_t idx, uint8_t* row) const;
-    void computeRowEhsMult(hand_index_t idx, uint8_t* row,
-                           float* ehs_out, uint8_t* mult_out) const;
+    void computeRow(hand_index_t idx, uint8_t *row) const;
+    void computeRowEhsMult(hand_index_t idx, uint8_t *row, float *ehs_out,
+                           uint8_t *mult_out) const;
     uint8_t computeMult(hand_index_t idx) const;
 
-public:
+  public:
     static constexpr uint64_t NUM_STATES = 2428287420ULL;
-    static constexpr int      DIMS       = NUM_BUCKETS;
+    static constexpr int DIMS = NUM_BUCKETS;
 
     RiverExpander();
     ~RiverExpander();
@@ -53,14 +53,13 @@ public:
 
     // Compute equity vectors for n arbitrary state indices (sampling step).
     // out must point to a buffer of n * DIMS uint8 bytes.
-    void compute_rows(const uint64_t* indices, size_t n, uint8_t* out) const;
+    void compute_rows(const uint64_t *indices, size_t n, uint8_t *out) const;
 
     // Compute equity vectors, EHS, and multiplicities for [start, start+n)
     // in a single parallel pass (streaming assignment step).
     // row_out:  n * DIMS uint8 bytes
     // ehs_out:  n floats  (decode directly; already in [0, 1])
     // mult_out: n uint8 bytes  (suit-isomorphism multiplicities in [1, 24])
-    void compute_range_ehs_mult(uint64_t start, int n,
-                                uint8_t* row_out, float* ehs_out,
-                                uint8_t* mult_out) const;
+    void compute_range_ehs_mult(uint64_t start, int n, uint8_t *row_out,
+                                float *ehs_out, uint8_t *mult_out) const;
 };
