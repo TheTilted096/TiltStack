@@ -67,7 +67,20 @@ class Scheduler {
     // ---- C++ interface ------------------------------------------------------
 
     void spawn(Task<float> task);
+
+    // Run the ready queue until empty, then flush to Python if any coroutines
+    // are suspended at inference. Returns once ready is empty again.
+    void runOneBatch();
+
+    // Remove completed root tasks from the tasks vector and return the count.
+    // Call after runOneBatch() to free finished coroutine frames and learn how
+    // many slots opened up for new spawns.
+    int purgeCompleted();
+
+    // Original one-shot drain — spawns nothing new, runs until all tasks done.
+    // Kept for unit tests.
     void run();
+
     std::size_t enqueueInference(InfoSet input, Handle handle);
 
     // ---- Python interface ---------------------------------------------------
@@ -75,8 +88,25 @@ class Scheduler {
     // Called by Python after writing inference results into pendingOutputs.
     void submitBatch();
 
-    // Raw pointers for zero-copy numpy / torch tensor construction.
-    InfoSet *inputData() { return pendingInputs.data(); }
+    // Raw pointers for zero-copy numpy / torch tensor construction (inference).
+    InfoSet *inputData()  { return pendingInputs.data(); }
     Regrets *outputData() { return pendingOutputs.data(); }
-    int batchSize() { return static_cast<int>(pendingHandles.size()); }
+    int batchSize()       { return static_cast<int>(pendingHandles.size()); }
+
+    // Number of root tasks currently alive (spawned but not yet purged).
+    int activeTasks() { return static_cast<int>(tasks.size()); }
+
+    // Raw pointers for zero-copy numpy / torch tensor construction (training).
+    InfoSet  *advantageInputData()  { return advantageInputs.data(); }
+    Regrets  *advantageOutputData() { return advantageOutputs.data(); }
+    int       advantageSize()       { return static_cast<int>(advantageInputs.size()); }
+
+    InfoSet  *policyInputData()   { return policyInputs.data(); }
+    Strategy *policyOutputData()  { return policyOutputs.data(); }
+    int      *policyWeightData()  { return policyWeights.data(); }
+    int       policySize()        { return static_cast<int>(policyInputs.size()); }
+
+    // Reset all replay buffers. Called by the worker at the start of each
+    // iteration so Python can safely harvest data between iterations.
+    void clearBuffers();
 };

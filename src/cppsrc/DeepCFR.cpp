@@ -1,7 +1,9 @@
 #include "DeepCFR.h"
+#include <limits>
 
-Action DeepCFR::sampleAction(const Strategy &strat, const ActionList &moves,
-                             int numMoves) {
+namespace DeepCFR {
+
+Action sampleAction(const Strategy &strat, const ActionList &moves, int numMoves) {
     float sample = rng.nextFloat();
     float cumulative = 0.0f;
     for (int i = 0; i < numMoves; i++) {
@@ -12,8 +14,7 @@ Action DeepCFR::sampleAction(const Strategy &strat, const ActionList &moves,
     return moves[numMoves - 1];
 }
 
-Strategy DeepCFR::getInstantStrat(const Regrets &r, const ActionList &moves,
-                                  int numMoves) {
+Strategy getInstantStrat(const Regrets &r, const ActionList &moves, int numMoves) {
     Strategy s{};
     float sum = 0.0f;
 
@@ -37,7 +38,7 @@ Strategy DeepCFR::getInstantStrat(const Regrets &r, const ActionList &moves,
 
 // ---------------------------------------------------------------------------
 
-Task<float> DeepCFR::rollout(bool hero, int t, Scheduler &sched) {
+Task<float> rollout(CFRGame game, bool hero, int t, Scheduler &sched) {
     if (game.isTerminal)
         co_return game.payout();
 
@@ -52,13 +53,14 @@ Task<float> DeepCFR::rollout(bool hero, int t, Scheduler &sched) {
     float nodeEV = 0.0f;
 
     if (game.stm() == hero) {
-        Regrets trueRegret{};
+        Regrets trueRegret;
+        trueRegret.fill(std::numeric_limits<float>::quiet_NaN());
         std::array<float, NUM_ACTIONS> actionUtils{};
 
         for (int i = 0; i < numMoves; i++) {
             int actionInt = static_cast<int>(moves[i]);
             game.makeMove(moves[i]);
-            actionUtils[actionInt] = co_await rollout(hero, t, sched);
+            actionUtils[actionInt] = co_await rollout(game, hero, t, sched);
             game.unmakeMove();
             nodeEV += instantStrategy[actionInt] * actionUtils[actionInt];
         }
@@ -82,8 +84,10 @@ Task<float> DeepCFR::rollout(bool hero, int t, Scheduler &sched) {
 
     Action villainMove = sampleAction(instantStrategy, moves, numMoves);
     game.makeMove(villainMove);
-    nodeEV = co_await rollout(hero, t, sched);
+    nodeEV = co_await rollout(game, hero, t, sched);
     game.unmakeMove();
 
     co_return nodeEV;
 }
+
+} // namespace DeepCFR

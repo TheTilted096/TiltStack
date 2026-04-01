@@ -23,19 +23,20 @@ struct InferenceAwaitable {
 };
 
 // ---------------------------------------------------------------------------
-// DeepCFR
-// One instance per root rollout. Owns the CFRGame that the rollout traverses.
-// rng is shared across all instances on the same thread.
+// DeepCFR namespace
+//
+// rollout() takes CFRGame by value so the game state lives inside the
+// heap-allocated coroutine frame and remains valid across all suspension
+// points.  A member-function coroutine would capture `this`; calling it on
+// a temporary (the natural spawn-site pattern) would leave that pointer
+// dangling before the coroutine ever resumed.
 // ---------------------------------------------------------------------------
 
-class DeepCFR {
-  public:
-    CFRGame game;
+namespace DeepCFR {
 
-    static Action sampleAction(const Strategy &strat, const ActionList &moves,
-                               int numMoves);
-    static Strategy getInstantStrat(const Regrets &r, const ActionList &moves,
-                                    int numMoves);
+Action   sampleAction  (const Strategy &strat, const ActionList &moves, int numMoves);
+Strategy getInstantStrat(const Regrets &r,     const ActionList &moves, int numMoves);
 
-    Task<float> rollout(bool hero, int t, Scheduler &sched);
-};
+Task<float> rollout(CFRGame game, bool hero, int t, Scheduler &sched);
+
+} // namespace DeepCFR

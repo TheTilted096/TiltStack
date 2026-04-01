@@ -298,8 +298,16 @@ InfoSet CFRGame::getInfo() {
     info.streetEmbed[roundNum] = true;
     info.isButton = (stm == 0);
 
+    // streetBucket slots 0,1,2 correspond to flop, turn, river (rounds 1,2,3).
+    // begin() stores raw 0-indexed cluster labels; +1 is applied here so that
+    // 0 is unambiguously "unused" and valid labels occupy 1–8192.
+    // Streets not yet reached in the current hand are written as 0.
     for (int i = 0; i < NUM_ROUNDS - 1; i++) {
-        info.streetBucket[i] = streetBucket[i][stm];
+        int round = i + 1; // 1=flop, 2=turn, 3=river
+        info.streetBucket[i] =
+            (currentRound >= static_cast<Round>(round))
+                ? static_cast<uint16_t>(streetBucket[round][stm] + 1)
+                : 0;
     }
 
     return info;

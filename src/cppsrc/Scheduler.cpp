@@ -5,6 +5,31 @@ void Scheduler::spawn(Task<float> task) {
     tasks.push_back(std::move(task));
 }
 
+void Scheduler::runOneBatch() {
+    while (!ready.empty()) {
+        Handle h = ready.front();
+        ready.pop();
+        h.resume();
+    }
+    if (!pendingHandles.empty())
+        flushBatch();
+}
+
+int Scheduler::purgeCompleted() {
+    std::vector<Task<float>> alive;
+    alive.reserve(tasks.size());
+    int completed = 0;
+    for (auto &task : tasks) {
+        if (task.done()) {
+            ++completed;
+        } else {
+            alive.push_back(std::move(task));
+        }
+    }
+    tasks = std::move(alive);
+    return completed;
+}
+
 void Scheduler::run() {
     while (true) {
         while (!ready.empty()) {
@@ -18,6 +43,14 @@ void Scheduler::run() {
 
         flushBatch();
     }
+}
+
+void Scheduler::clearBuffers() {
+    advantageInputs.clear();
+    advantageOutputs.clear();
+    policyInputs.clear();
+    policyOutputs.clear();
+    policyWeights.clear();
 }
 
 std::size_t Scheduler::enqueueInference(InfoSet input, Handle handle) {
