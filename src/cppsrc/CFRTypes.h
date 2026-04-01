@@ -18,24 +18,24 @@ const int MAX_ACTIONS = 6; // maximum number of actions per betting round
 
 const int NUM_ROUNDS = 4;
 
-enum class Action : uint8_t { 
+enum class Action : uint8_t {
     CHECK, // also FOLD
-    CALL, 
-    BET50, 
-    BET100, 
-    //BET200, 
-    ALLIN 
+    CALL,
+    BET50,
+    BET100,
+    // BET200,
+    ALLIN
 };
 
 enum class Round : uint8_t { PREFLOP, FLOP, TURN, RIVER };
 
 using Strategy = std::array<float, NUM_ACTIONS>; // array of probabilities
-using Regrets = std::array<float, NUM_ACTIONS>; // array of regrets
+using Regrets = std::array<float, NUM_ACTIONS>;  // array of regrets
 using CardArr = std::array<float, 52>; // array of 0.0 or 1.0 depending on card
 
 using ActionList = std::array<Action, NUM_ACTIONS>;
 
-struct InfoSet{
+struct InfoSet {
     // 8-byte: card presence bitfields (52 LSBs used, one bit per card index)
     uint64_t hole, flop, turn, river;
 
@@ -52,7 +52,7 @@ struct InfoSet{
     bool isButton; // true if stm == 0
 };
 
-struct BoardState{
+struct BoardState {
     int pot;
     int toCall;
     bool stm;

@@ -17,7 +17,8 @@
 
 class RNG {
     uint64_t state_;
-public:
+
+  public:
     explicit RNG(uint64_t seed = 0xdeadbeefcafe1234ULL) : state_(seed) {}
 
     void seed(uint64_t s) { state_ = s; }
@@ -59,32 +60,35 @@ inline std::vector<uint16_t> gLabels[NUM_ROUNDS];
 // Call once from the main thread before constructing any CFRGame.
 // ---------------------------------------------------------------------------
 
-inline void readU16File(const std::string& path, std::vector<uint16_t>& out) {
+inline void readU16File(const std::string &path, std::vector<uint16_t> &out) {
     std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f) throw std::runtime_error("Cannot open: " + path);
+    if (!f)
+        throw std::runtime_error("Cannot open: " + path);
     auto bytes = static_cast<std::size_t>(f.tellg());
     if (bytes % 2 != 0)
-        throw std::runtime_error("Odd file size (corrupt uint16 file?): " + path);
+        throw std::runtime_error("Odd file size (corrupt uint16 file?): " +
+                                 path);
     f.seekg(0);
     out.resize(bytes / 2);
-    f.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(bytes));
+    f.read(reinterpret_cast<char *>(out.data()),
+           static_cast<std::streamsize>(bytes));
     if (!f)
         throw std::runtime_error("Read failed: " + path);
 }
 
-inline void loadTables(const std::string& clusters_dir) {
+inline void loadTables(const std::string &clusters_dir) {
     const std::string d = clusters_dir + "/";
 
     readU16File(d + "preflop_ehs_fine.bin", gEHS[0]);
-    readU16File(d + "flop_ehs_fine.bin",    gEHS[1]);
-    readU16File(d + "turn_ehs_fine.bin",    gEHS[2]);
-    readU16File(d + "river_ehs_fine.bin",   gEHS[3]);
+    readU16File(d + "flop_ehs_fine.bin", gEHS[1]);
+    readU16File(d + "turn_ehs_fine.bin", gEHS[2]);
+    readU16File(d + "river_ehs_fine.bin", gEHS[3]);
 
     // Preflop: no cluster labels — use identity (bucket == canonical index).
     gLabels[0].resize(gEHS[0].size());
     std::iota(gLabels[0].begin(), gLabels[0].end(), uint16_t{0});
 
-    readU16File(d + "flop_labels.bin",  gLabels[1]);
-    readU16File(d + "turn_labels.bin",  gLabels[2]);
+    readU16File(d + "flop_labels.bin", gLabels[1]);
+    readU16File(d + "turn_labels.bin", gLabels[2]);
     readU16File(d + "river_labels.bin", gLabels[3]);
 }

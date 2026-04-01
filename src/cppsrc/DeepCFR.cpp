@@ -1,6 +1,7 @@
 #include "DeepCFR.h"
 
-Action DeepCFR::sampleAction(const Strategy& strat, const ActionList& moves, int numMoves) {
+Action DeepCFR::sampleAction(const Strategy &strat, const ActionList &moves,
+                             int numMoves) {
     float sample = rng.nextFloat();
     float cumulative = 0.0f;
     for (int i = 0; i < numMoves; i++) {
@@ -11,7 +12,8 @@ Action DeepCFR::sampleAction(const Strategy& strat, const ActionList& moves, int
     return moves[numMoves - 1];
 }
 
-Strategy DeepCFR::getInstantStrat(const Regrets& r, const ActionList& moves, int numMoves) {
+Strategy DeepCFR::getInstantStrat(const Regrets &r, const ActionList &moves,
+                                  int numMoves) {
     Strategy s{};
     float sum = 0.0f;
 
@@ -35,15 +37,17 @@ Strategy DeepCFR::getInstantStrat(const Regrets& r, const ActionList& moves, int
 
 // ---------------------------------------------------------------------------
 
-Task<float> DeepCFR::rollout(bool hero, int t, Scheduler& sched) {
+Task<float> DeepCFR::rollout(bool hero, int t, Scheduler &sched) {
     if (game.isTerminal)
         co_return game.payout();
 
     ActionList moves;
     int numMoves = game.generateActions(moves);
 
-    Regrets predictedRegrets = co_await InferenceAwaitable{game.getInfo(), sched};
-    Strategy instantStrategy  = getInstantStrat(predictedRegrets, moves, numMoves);
+    Regrets predictedRegrets =
+        co_await InferenceAwaitable{game.getInfo(), sched};
+    Strategy instantStrategy =
+        getInstantStrat(predictedRegrets, moves, numMoves);
 
     float nodeEV = 0.0f;
 
@@ -62,7 +66,8 @@ Task<float> DeepCFR::rollout(bool hero, int t, Scheduler& sched) {
         float pot = static_cast<float>(game.history[game.ply].pot);
         for (int j = 0; j < numMoves; j++) {
             int actionInt = static_cast<int>(moves[j]);
-            trueRegret[actionInt] = (actionUtils[actionInt] - nodeEV) / (pot + static_cast<float>(BIG_BLIND));
+            trueRegret[actionInt] = (actionUtils[actionInt] - nodeEV) /
+                                    (pot + static_cast<float>(BIG_BLIND));
         }
 
         sched.advantageInputs.push_back(game.getInfo());
