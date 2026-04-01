@@ -1,5 +1,5 @@
-#include <gtest/gtest.h>
 #include "CFRUtils.h"
+#include <gtest/gtest.h>
 
 // Same seed must produce the same sequence.
 TEST(RNG, Determinism) {

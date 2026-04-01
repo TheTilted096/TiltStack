@@ -1,28 +1,27 @@
-#include <gtest/gtest.h>
 #include <atomic>
 #include <chrono>
+#include <gtest/gtest.h>
 #include <thread>
 
-#include "DeepCFR.h"   // InferenceAwaitable, Task, Scheduler, InferenceQueue
+#include "DeepCFR.h" // InferenceAwaitable, Task, Scheduler, InferenceQueue
 
 // ---------------------------------------------------------------------------
 // Coroutines used as test fixtures
 // ---------------------------------------------------------------------------
 
 // Immediately returns without touching inference.
-static Task<float> trivialTask() {
-    co_return 0.0f;
-}
+static Task<float> trivialTask() { co_return 0.0f; }
 
 // Suspends once for inference, stores the result, then returns.
-static Task<float> singleInferenceTask(Scheduler& sched, Regrets& out) {
+static Task<float> singleInferenceTask(Scheduler &sched, Regrets &out) {
     out = co_await InferenceAwaitable{InfoSet{}, sched};
     co_return 0.0f;
 }
 
 // Same, but writes to an indexed slot — used to verify each coroutine
 // reads its own output and not a neighbour's.
-static Task<float> indexedInferenceTask(Scheduler& sched, int id, Regrets* slots) {
+static Task<float> indexedInferenceTask(Scheduler &sched, int id,
+                                        Regrets *slots) {
     slots[id] = co_await InferenceAwaitable{InfoSet{}, sched};
     co_return 0.0f;
 }
@@ -49,7 +48,10 @@ TEST(InferenceQueue, BlocksUntilPush) {
     Scheduler s(dummy);
 
     std::atomic<bool> popped{false};
-    std::thread t([&]() { queue.pop(); popped = true; });
+    std::thread t([&]() {
+        queue.pop();
+        popped = true;
+    });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_FALSE(popped);
@@ -83,7 +85,7 @@ TEST(Scheduler, SingleInferenceRound) {
 
     std::thread worker([&]() { sched.run(); });
 
-    Scheduler* s = queue.pop();     // blocks until flushBatch() pushes
+    Scheduler *s = queue.pop(); // blocks until flushBatch() pushes
     ASSERT_EQ(s, &sched);
     ASSERT_EQ(s->batchSize(), 1);
 
@@ -107,7 +109,7 @@ TEST(Scheduler, IndexStability) {
 
     std::thread worker([&]() { sched.run(); });
 
-    Scheduler* s = queue.pop();
+    Scheduler *s = queue.pop();
     ASSERT_EQ(s->batchSize(), 2);
 
     const Regrets out0 = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
