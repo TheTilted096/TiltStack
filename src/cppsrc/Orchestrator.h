@@ -14,8 +14,9 @@ class Orchestrator {
     // Number of concurrent rollouts each worker maintains.
     static constexpr int POOL_SIZE = 4096;
 
-    InferenceQueue           iq;
-    std::vector<Scheduler *> schedulerPtrs; // valid for the lifetime of threadPool_
+    InferenceQueue iq;
+    std::vector<Scheduler *>
+        schedulerPtrs; // valid for the lifetime of threadPool_
 
     explicit Orchestrator(int numThreads,
                           uint64_t seed = 0xdeadbeefcafe1234ULL);
@@ -34,7 +35,8 @@ class Orchestrator {
     void waitIteration();
 
     // Proxy for iq.pop(). Returns nullptr as a per-thread sentinel — Python's
-    // service loop should count numThreads nullptrs before calling waitIteration().
+    // service loop should count numThreads nullptrs before calling
+    // waitIteration().
     Scheduler *pop() { return iq.pop(); }
 
     int numThreads() const { return numThreads_; }
@@ -44,25 +46,29 @@ class Orchestrator {
     void clearBuffers();
 
   private:
-    int      numThreads_;
+    int numThreads_;
     uint64_t seed_;
 
     // Per-iteration parameters written by startIteration(), read by workers
     // while holding mtx_ at wakeup.
-    bool currentHero_      = false;
-    int  currentT_         = 0;
-    int  samplesPerThread_ = 0;
+    bool currentHero_ = false;
+    int currentT_ = 0;
+    int samplesPerThread_ = 0;
 
-    std::atomic<int>        threadsActive_{0};
-    int                     registeredCount_ = 0;
+    std::atomic<int> threadsActive_{0};
+    int registeredCount_ = 0;
 
-    std::mutex              mtx_;
+    std::mutex mtx_;
     std::condition_variable startCV_; // workers wait here between iterations
     std::condition_variable doneCV_;  // constructor + waitIteration() wait here
-    bool                    iterReady_ = false;
-    bool                    shutdown_  = false;
+    bool iterReady_ = false;
+    bool shutdown_ = false;
 
     std::vector<std::thread> threadPool_;
+
+    // Stores the first exception thrown by any worker thread during an
+    // iteration. Re-thrown by waitIteration() so Python sees it.
+    std::exception_ptr workerException_;
 
     void runWorker(int threadIdx);
 };

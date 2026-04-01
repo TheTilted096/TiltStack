@@ -23,17 +23,18 @@ void Orchestrator::drainPool() {
     }
     startCV_.notify_all();
     for (auto &t : threadPool_)
-        if (t.joinable()) t.join();
+        if (t.joinable())
+            t.join();
 }
 
 void Orchestrator::startIteration(bool hero, int t, int totalSamples) {
     {
         std::unique_lock lock(mtx_);
-        currentHero_      = hero;
-        currentT_         = t;
+        currentHero_ = hero;
+        currentT_ = t;
         samplesPerThread_ = totalSamples / numThreads_;
-        threadsActive_    = numThreads_;
-        iterReady_        = true;
+        threadsActive_ = numThreads_;
+        iterReady_ = true;
     }
     startCV_.notify_all();
 }
@@ -46,6 +47,11 @@ void Orchestrator::waitIteration() {
     }
     // Release workers waiting on !iterReady_ so they can loop back to sleep.
     startCV_.notify_all();
+
+    // Re-throw any exception captured from a worker thread. Done after
+    // releasing workers so they are not left blocked on startCV_.
+    if (workerException_)
+        std::rethrow_exception(std::exchange(workerException_, nullptr));
 }
 
 void Orchestrator::clearBuffers() {
@@ -72,33 +78,52 @@ void Orchestrator::runWorker(int threadIdx) {
     while (true) {
         // Wait for startIteration() or drainPool().
         bool hero;
-        int  t, target;
+        int t, target;
         {
             std::unique_lock lock(mtx_);
             startCV_.wait(lock, [this] { return iterReady_ || shutdown_; });
-            if (shutdown_) break;
-            hero   = currentHero_;
-            t      = currentT_;
+            if (shutdown_)
+                break;
+            hero = currentHero_;
+            t = currentT_;
             target = samplesPerThread_;
         }
 
         sched.clearBuffers();
 
-        // Fill the initial pool.
-        for (int i = 0; i < POOL_SIZE; i++)
-            sched.spawn(DeepCFR::rollout(CFRGame{}, hero, t, sched));
+        try {
+            // Fill the initial pool.
+            for (int i = 0; i < POOL_SIZE; i++) {
+                CFRGame g;
+                g.begin(STARTING_STACK, STARTING_STACK, hero);
+                sched.spawn(DeepCFR::rollout(std::move(g), hero, t, sched));
+            }
 
-        // Run until the sample quota is met and all active rollouts have drained.
-        while (sched.activeTasks() > 0) {
-            sched.runOneBatch();
-            int completed = sched.purgeCompleted();
-            if (sched.advantageSize() < target)
-                for (int i = 0; i < completed; i++)
-                    sched.spawn(DeepCFR::rollout(CFRGame{}, hero, t, sched));
+            // Run until the sample quota is met and all active rollouts have
+            // drained.
+            while (sched.activeTasks() > 0) {
+                sched.runOneBatch();
+                int completed = sched.purgeCompleted();
+                if (sched.advantageSize() < target)
+                    for (int i = 0; i < completed; i++) {
+                        CFRGame g;
+                        g.begin(STARTING_STACK, STARTING_STACK, hero);
+                        sched.spawn(
+                            DeepCFR::rollout(std::move(g), hero, t, sched));
+                    }
+            }
+        } catch (...) {
+            // Store the first exception; subsequent ones are silently dropped
+            // since the iteration is already failed.
+            {
+                std::unique_lock lock(mtx_);
+                if (!workerException_)
+                    workerException_ = std::current_exception();
+            }
         }
 
-        // Push a nullptr sentinel. Python's pop() loop counts one per thread
-        // to know when all workers are finished for this iteration.
+        // Always push the sentinel so Python's pop() loop is not left hanging,
+        // regardless of whether the work block succeeded or threw.
         iq.push(nullptr);
 
         {

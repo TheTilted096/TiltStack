@@ -34,9 +34,20 @@ struct InferenceAwaitable {
 
 namespace DeepCFR {
 
-Action   sampleAction  (const Strategy &strat, const ActionList &moves, int numMoves);
-Strategy getInstantStrat(const Regrets &r,     const ActionList &moves, int numMoves);
+Action sampleAction(const Strategy &strat, const ActionList &moves,
+                    int numMoves);
+Strategy getInstantStrat(const Regrets &r, const ActionList &moves,
+                         int numMoves);
 
+// Root entry point: owns `game` by value in its coroutine frame, then
+// immediately delegates to traverse().  Taking by value here (rather than
+// as a member) keeps the frame alive across all suspension points without
+// capturing a pointer to a temporary.
 Task<float> rollout(CFRGame game, bool hero, int t, Scheduler &sched);
+
+// Recursive worker: takes `game` by reference so the same CFRGame object is
+// shared across the entire tree.  makeMove/unmakeMove maintain game state;
+// no CFRGame copies are made, avoiding shallow-copy of hand_indexer_t.
+Task<float> traverse(CFRGame &game, bool hero, int t, Scheduler &sched);
 
 } // namespace DeepCFR

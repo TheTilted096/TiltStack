@@ -3,18 +3,10 @@
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 import pybind11
-import sys
 
-if sys.platform == 'win32':
-    cpp_flags = ['/O2', '/openmp', '/std:c++14']
-    extra_link_args = []
-else:
-    cpp_flags = ['-O3', '-fopenmp', '-std=c++11']
-    extra_link_args = ['-fopenmp']
-
-# Flags that are C++-only and must not be forwarded to the C compiler.
-_CPP_ONLY_FLAGS = {'/std:c++14', '-std=c++11', '-std=c++14', '-std=c++17'}
-_c_flags = [f for f in cpp_flags if f not in _CPP_ONLY_FLAGS]
+cpp_flags = ['-O3', '-fopenmp', '-std=c++11']
+extra_link_args = ['-fopenmp']
+_c_flags = [f for f in cpp_flags if not f.startswith('-std=')]
 
 
 class BuildExtMixed(build_ext):

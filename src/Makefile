@@ -1,45 +1,51 @@
 # ---------------------------------------------------------------------------
 #  src/Makefile
 #
-#  Builds the hand_indexer pybind11 module.
+#  Targets
+#  -------
+#    make hand_indexer   Build the hand_indexer pybind11 module and copy to pysrc/
+#    make deepcfr        Build the deepcfr pybind11 module and copy to pysrc/
+#    make all            Build both modules (default)
+#    make test           Compile and run C++ unit tests
+#    make clean          Remove build/ artifacts and pysrc/ .so files
+#    make clean-hard     Also remove clusters/
 #
-#  Usage (from src/):
-#    make                  # build hand_indexer pybind module
-#    make clean            # remove build/ artifacts and pysrc/hand_indexer.*
-#    make clean-hard       # also remove clusters/
+#  Quick-start
+#  -----------
+#    cd src/
+#    make                              # builds hand_indexer + deepcfr
+#    python pysrc/NLHE_Trainer.py      # pilot run (default: 20 iterations)
 #
-#  Clustering pipeline:
-#    python pysrc/river_cluster_pipeline.py [options]
+#  Smoke-test (fast sanity check before a full run)
+#    python pysrc/NLHE_Trainer.py \
+#        --iterations 1 --threads 1 --total-samples 10000 \
+#        --clusters-dir clusters
 #
-#  See pysrc/river_cluster_pipeline.py for pipeline parameters.
+#  Clustering pipeline (run once; outputs go to clusters/)
+#    python pysrc/preflop_ehs_pipeline.py
+#    python pysrc/flop_cluster_pipeline.py
+#    python pysrc/turn_cluster_pipeline.py
+#    python pysrc/river_cluster_pipeline.py
 # ---------------------------------------------------------------------------
 
-# OS-specific commands
-ifeq ($(OS),Windows_NT)
-  SHELL        = cmd.exe
-  PYTHON       = py
-  MKDIR_BUILD  = if not exist build mkdir build
-  COPY_PYBIND  = copy /Y build\hand_indexer*.pyd pysrc\ >nul 2>&1 || echo.
-else
-  PYTHON       = python3
-  MKDIR_BUILD  = mkdir -p build
-  COPY_PYBIND  = cp -f build/hand_indexer*.so pysrc/
-endif
+PYTHON      = python3
+MKDIR_BUILD = mkdir -p build
 
-# ---- Build targets --------------------------------------------------------
-
-# GTest headers and libs are provided by the active conda environment.
+# GTest headers and libs (provided by the active conda environment).
 GTEST_INC = $(CONDA_PREFIX)/include
 GTEST_LIB = $(CONDA_PREFIX)/lib
 
-.PHONY: all pybind test clean clean-hard
+.PHONY: all hand_indexer deepcfr test clean clean-hard
 
+all: hand_indexer deepcfr
 
-all: pybind
-
-pybind: | build
+hand_indexer: | build
 	$(PYTHON) setup.py build_ext --build-lib=build --build-temp=build/temp
-	$(COPY_PYBIND)
+	cp -f build/hand_indexer*.so pysrc/
+
+deepcfr: | build
+	$(PYTHON) setup_deepcfr.py build_ext --build-lib=build --build-temp=build/temp
+	cp -f build/deepcfr*.so pysrc/
 
 test: | build
 	gcc -O2 \
@@ -68,26 +74,12 @@ build:
 	$(MKDIR_BUILD)
 
 tidy:
-	find . -name "*.h" -exec clang-format -i -style="{BasedOnStyle: llvm, IndentWidth: 4}" {} +
+	find . -name "*.h"   -exec clang-format -i -style="{BasedOnStyle: llvm, IndentWidth: 4}" {} +
 	find . -name "*.cpp" -exec clang-format -i -style="{BasedOnStyle: llvm, IndentWidth: 4}" {} +
 
-# ---- Clean targets ---------------------------------------------------------
-
-ifeq ($(OS),Windows_NT)
+# ---------------------------------------------------------------------------
 clean:
-	-if exist build rmdir /S /Q build
-	-if exist hand_indexer.egg-info rmdir /S /Q hand_indexer.egg-info
-	-del /Q pysrc\hand_indexer.* 2>nul
+	rm -rf build *.egg-info pysrc/hand_indexer.* pysrc/deepcfr.*
 
 clean-hard:
-	-if exist build rmdir /S /Q build
-	-if exist clusters rmdir /S /Q clusters
-	-if exist hand_indexer.egg-info rmdir /S /Q hand_indexer.egg-info
-	-del /Q pysrc\hand_indexer.* 2>nul
-else
-clean:
-	rm -rf build *.egg-info pysrc/hand_indexer.*
-
-clean-hard:
-	rm -rf build clusters *.egg-info pysrc/hand_indexer.*
-endif
+	rm -rf build clusters checkpoints *.egg-info pysrc/hand_indexer.* pysrc/deepcfr.*

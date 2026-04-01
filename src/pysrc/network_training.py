@@ -187,6 +187,89 @@ class DeepCFRNet(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# Reservoir sampling
+# ---------------------------------------------------------------------------
+
+class Reservoir:
+    """
+    Fixed-capacity uniform reservoir (Algorithm R) with batch insertion.
+
+    Rather than processing items one at a time, add() evaluates accept
+    probabilities and picks replacement positions for an entire batch in
+    NumPy, then scatter-writes only the accepted items.  This keeps the
+    Python-loop overhead proportional to the number of accepted items
+    (O(K * ln(1 + B/n)) on average) rather than to the batch size B.
+
+    Parameters
+    ----------
+    capacity     : maximum number of samples to retain
+    infoset_bytes: width of the raw InfoSet buffer (== deepcfr.INFOSET_BYTES)
+    has_weights  : if True, allocate and maintain an int32 weight column
+    """
+
+    def __init__(self, capacity: int, infoset_bytes: int,
+                 has_weights: bool = False):
+        self.capacity = capacity
+        self.n_seen   = 0
+        self.inputs   = np.empty((capacity, infoset_bytes), dtype=np.uint8)
+        self.targets  = np.empty((capacity, NUM_ACTIONS),   dtype=np.float32)
+        self.weights  = np.empty(capacity, dtype=np.int32) if has_weights else None
+        self._rng     = np.random.default_rng()
+
+    @property
+    def size(self) -> int:
+        """Number of valid (filled) entries in the reservoir."""
+        return min(self.n_seen, self.capacity)
+
+    def add(self, new_inputs: np.ndarray, new_targets: np.ndarray,
+            new_weights: np.ndarray | None = None) -> None:
+        """
+        Offer a batch of B samples to the reservoir.
+
+        The first samples fill empty slots directly.  For subsequent samples
+        at stream position m (1-indexed), each is accepted with probability
+        capacity/m and replaces a uniformly random existing slot.
+
+        When two accepted items in the same batch target the same slot, the
+        later one wins — a negligible bias when B << capacity.
+        """
+        B = len(new_inputs)
+        K = self.capacity
+        n = self.n_seen
+
+        # Phase 1: fill remaining empty slots directly.
+        fill = min(max(K - n, 0), B)
+        if fill > 0:
+            self.inputs [n:n + fill] = new_inputs [:fill]
+            self.targets[n:n + fill] = new_targets[:fill]
+            if self.weights is not None and new_weights is not None:
+                self.weights[n:n + fill] = new_weights[:fill]
+
+        # Phase 2: reservoir-sample the remaining items.
+        rest = B - fill
+        if rest > 0:
+            ri = new_inputs [fill:]
+            rt = new_targets[fill:]
+            rw = new_weights[fill:] if (self.weights is not None
+                                        and new_weights is not None) else None
+
+            # 1-indexed stream positions of these items.
+            m = np.arange(n + fill + 1, n + B + 1, dtype=np.float64)
+
+            # Accept each with probability K/m; pick a replacement slot.
+            accept = self._rng.random(rest) * m < K
+            if accept.any():
+                idx = np.where(accept)[0]
+                pos = self._rng.integers(0, K, size=len(idx))
+                self.inputs [pos] = ri[idx]
+                self.targets[pos] = rt[idx]
+                if self.weights is not None and rw is not None:
+                    self.weights[pos] = rw[idx]
+
+        self.n_seen += B
+
+
+# ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
 
@@ -210,7 +293,7 @@ def train_advantage(
     loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True,
                          pin_memory=True, num_workers=0)
     net.train()
-    last_loss = 0.0
+    losses = []
 
     for _ in range(epochs):
         total = 0.0
@@ -225,9 +308,9 @@ def train_advantage(
             loss.backward()
             optimizer.step()
             total += loss.item()
-        last_loss = total / len(loader)
+        losses.append(total / len(loader))
 
-    return last_loss
+    return losses
 
 
 def train_policy(
@@ -262,13 +345,16 @@ def train_policy(
     loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True,
                          pin_memory=True, num_workers=0)
     net.train()
-    last_loss = 0.0
+    losses = []
 
     for _ in range(epochs):
         total = 0.0
         for xc, b, t, wt in loader:
             xc, b, t, wt = xc.to(device), b.to(device), t.to(device), wt.to(device)
             optimizer.zero_grad()
+            # Normalise weights within the mini-batch so they sum to 1,
+            # preventing the loss magnitude from scaling with iteration number.
+            wt = wt / wt.mean()
             # Cross-entropy with soft targets: -sum_a target(a) * log_softmax(pred(a))
             log_probs  = F.log_softmax(net(xc, b), dim=1)
             per_sample = -(t * log_probs).sum(dim=1)
@@ -276,6 +362,6 @@ def train_policy(
             loss.backward()
             optimizer.step()
             total += loss.item()
-        last_loss = total / len(loader)
+        losses.append(total / len(loader))
 
-    return last_loss
+    return losses

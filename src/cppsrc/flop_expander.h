@@ -28,6 +28,10 @@
 
 #pragma once
 
+// Include OMPEval before hand-isomorphism: deck.h defines CARDS/RANKS/SUITS
+// macros that collide with OMPEval identifiers.
+#include "../third_party/OMPEval/HandEvaluator.h"
+
 extern "C" {
 #include "hand_index.h"
 }

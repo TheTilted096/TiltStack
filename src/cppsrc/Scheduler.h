@@ -89,22 +89,22 @@ class Scheduler {
     void submitBatch();
 
     // Raw pointers for zero-copy numpy / torch tensor construction (inference).
-    InfoSet *inputData()  { return pendingInputs.data(); }
+    InfoSet *inputData() { return pendingInputs.data(); }
     Regrets *outputData() { return pendingOutputs.data(); }
-    int batchSize()       { return static_cast<int>(pendingHandles.size()); }
+    int batchSize() { return static_cast<int>(pendingHandles.size()); }
 
     // Number of root tasks currently alive (spawned but not yet purged).
     int activeTasks() { return static_cast<int>(tasks.size()); }
 
     // Raw pointers for zero-copy numpy / torch tensor construction (training).
-    InfoSet  *advantageInputData()  { return advantageInputs.data(); }
-    Regrets  *advantageOutputData() { return advantageOutputs.data(); }
-    int       advantageSize()       { return static_cast<int>(advantageInputs.size()); }
+    InfoSet *advantageInputData() { return advantageInputs.data(); }
+    Regrets *advantageOutputData() { return advantageOutputs.data(); }
+    int advantageSize() { return static_cast<int>(advantageInputs.size()); }
 
-    InfoSet  *policyInputData()   { return policyInputs.data(); }
-    Strategy *policyOutputData()  { return policyOutputs.data(); }
-    int      *policyWeightData()  { return policyWeights.data(); }
-    int       policySize()        { return static_cast<int>(policyInputs.size()); }
+    InfoSet *policyInputData() { return policyInputs.data(); }
+    Strategy *policyOutputData() { return policyOutputs.data(); }
+    int *policyWeightData() { return policyWeights.data(); }
+    int policySize() { return static_cast<int>(policyInputs.size()); }
 
     // Reset all replay buffers. Called by the worker at the start of each
     // iteration so Python can safely harvest data between iterations.

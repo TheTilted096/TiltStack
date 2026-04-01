@@ -3,7 +3,8 @@
 
 namespace DeepCFR {
 
-Action sampleAction(const Strategy &strat, const ActionList &moves, int numMoves) {
+Action sampleAction(const Strategy &strat, const ActionList &moves,
+                    int numMoves) {
     float sample = rng.nextFloat();
     float cumulative = 0.0f;
     for (int i = 0; i < numMoves; i++) {
@@ -14,7 +15,8 @@ Action sampleAction(const Strategy &strat, const ActionList &moves, int numMoves
     return moves[numMoves - 1];
 }
 
-Strategy getInstantStrat(const Regrets &r, const ActionList &moves, int numMoves) {
+Strategy getInstantStrat(const Regrets &r, const ActionList &moves,
+                         int numMoves) {
     Strategy s{};
     float sum = 0.0f;
 
@@ -39,6 +41,11 @@ Strategy getInstantStrat(const Regrets &r, const ActionList &moves, int numMoves
 // ---------------------------------------------------------------------------
 
 Task<float> rollout(CFRGame game, bool hero, int t, Scheduler &sched) {
+    // game is owned by this frame for the lifetime of the traversal.
+    co_return co_await traverse(game, hero, t, sched);
+}
+
+Task<float> traverse(CFRGame &game, bool hero, int t, Scheduler &sched) {
     if (game.isTerminal)
         co_return game.payout();
 
@@ -60,7 +67,7 @@ Task<float> rollout(CFRGame game, bool hero, int t, Scheduler &sched) {
         for (int i = 0; i < numMoves; i++) {
             int actionInt = static_cast<int>(moves[i]);
             game.makeMove(moves[i]);
-            actionUtils[actionInt] = co_await rollout(game, hero, t, sched);
+            actionUtils[actionInt] = co_await traverse(game, hero, t, sched);
             game.unmakeMove();
             nodeEV += instantStrategy[actionInt] * actionUtils[actionInt];
         }
@@ -84,7 +91,7 @@ Task<float> rollout(CFRGame game, bool hero, int t, Scheduler &sched) {
 
     Action villainMove = sampleAction(instantStrategy, moves, numMoves);
     game.makeMove(villainMove);
-    nodeEV = co_await rollout(game, hero, t, sched);
+    nodeEV = co_await traverse(game, hero, t, sched);
     game.unmakeMove();
 
     co_return nodeEV;

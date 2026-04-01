@@ -3,17 +3,10 @@
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 import pybind11
-import sys
 
-if sys.platform == 'win32':
-    cpp_flags = ['/O2', '/std:c++20']
-    extra_link_args = []
-else:
-    cpp_flags = ['-O3', '-std=c++20']
-    extra_link_args = ['-lpthread']
-
-_CPP_ONLY_FLAGS = {'/std:c++20', '-std=c++20'}
-_c_flags = [f for f in cpp_flags if f not in _CPP_ONLY_FLAGS]
+cpp_flags = ['-O3', '-std=c++20']
+extra_link_args = ['-lpthread']
+_c_flags = [f for f in cpp_flags if not f.startswith('-std=')]
 
 
 class BuildExtMixed(build_ext):

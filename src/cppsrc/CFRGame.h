@@ -1,4 +1,5 @@
 #include "CFRUtils.h"
+#include <cstring>
 // Include OMPEval before hand-isomorphism: deck.h defines CARDS/RANKS/SUITS
 // macros that collide with OMPEval identifiers.
 #include "../third_party/OMPEval/HandEvaluator.h"
@@ -31,6 +32,49 @@ class CFRGame {
 
     CFRGame();
     ~CFRGame();
+
+    // hand_indexer_t owns heap-allocated tables via malloc; disable copy,
+    // enable move.  The moved-from object's destructor is made a no-op by
+    // zeroing rounds, since hand_indexer_free() loops on that field.
+    CFRGame(const CFRGame &) = delete;
+    CFRGame &operator=(const CFRGame &) = delete;
+
+    CFRGame(CFRGame &&other) noexcept {
+        history = other.history;
+        ply = other.ply;
+        stacks = other.stacks;
+        initialStacks = other.initialStacks;
+        hero = other.hero;
+        isTerminal = other.isTerminal;
+        actionCount = other.actionCount;
+        currentRound = other.currentRound;
+        std::memcpy(betHist, other.betHist, sizeof(betHist));
+        std::memcpy(streetBucket, other.streetBucket, sizeof(streetBucket));
+        std::memcpy(streetEHS, other.streetEHS, sizeof(streetEHS));
+        std::memcpy(streetIDs, other.streetIDs, sizeof(streetIDs));
+        indexer = other.indexer;
+        other.indexer.rounds = 0; // disarm moved-from destructor
+    }
+    CFRGame &operator=(CFRGame &&other) noexcept {
+        if (this != &other) {
+            hand_indexer_free(&indexer);
+            history = other.history;
+            ply = other.ply;
+            stacks = other.stacks;
+            initialStacks = other.initialStacks;
+            hero = other.hero;
+            isTerminal = other.isTerminal;
+            actionCount = other.actionCount;
+            currentRound = other.currentRound;
+            std::memcpy(betHist, other.betHist, sizeof(betHist));
+            std::memcpy(streetBucket, other.streetBucket, sizeof(streetBucket));
+            std::memcpy(streetEHS, other.streetEHS, sizeof(streetEHS));
+            std::memcpy(streetIDs, other.streetIDs, sizeof(streetIDs));
+            indexer = other.indexer;
+            other.indexer.rounds = 0;
+        }
+        return *this;
+    }
 
     void begin(int, int, bool);
 

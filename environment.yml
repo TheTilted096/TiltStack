@@ -1,5 +1,7 @@
 name: tiltstack
 channels:
+  - pytorch
+  - nvidia
   - conda-forge
   - defaults
 dependencies:
@@ -9,6 +11,8 @@ dependencies:
   - pybind11
   - faiss-gpu       # required for all clustering pipelines
   - gtest           # required for C++ unit tests (make test)
+  - pytorch=2.5.1=py3.11_cuda12.4_cudnn9.1.0_0  # GPU; requires CUDA 12.x driver
+  - pytorch-cuda=12.4
   - pip
   - pip:
       - setuptools>=42.0.0

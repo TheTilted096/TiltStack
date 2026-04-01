@@ -225,7 +225,7 @@ void HandEvaluator::calculatePerfectHashOffsets() {
     size_t maxIdx = 0;
     for (size_t i = 0; i < rows.size(); ++i) {
         size_t offset = 0; //-(rows[i].second[0] & PERF_HASH_COLUMN_MASK); makes
-                           //no difference so let's avoid negative
+                           // no difference so let's avoid negative
         for (;; ++offset) {
             bool ok = true;
             for (auto x : rows[i].second) {
