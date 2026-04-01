@@ -31,15 +31,13 @@ class CFRGame{
         CFRGame();
         ~CFRGame();
 
-        void begin(int, int, bool, RNG&);
+        void begin(int, int, bool);
 
         int isTerminalState(const Action&);
         bool isFold(const Action&);
         bool endsStreet(const Action&);
 
         bool stm();
-        Action lastAction();
-
         void makeMove(const Action&);
         void unmakeMove();
 

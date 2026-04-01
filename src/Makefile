@@ -28,13 +28,41 @@ endif
 
 # ---- Build targets --------------------------------------------------------
 
-.PHONY: all pybind clean clean-hard
+# GTest headers and libs are provided by the active conda environment.
+GTEST_INC = $(CONDA_PREFIX)/include
+GTEST_LIB = $(CONDA_PREFIX)/lib
+
+.PHONY: all pybind test clean clean-hard
+
 
 all: pybind
 
 pybind: | build
 	$(PYTHON) setup.py build_ext --build-lib=build --build-temp=build/temp
 	$(COPY_PYBIND)
+
+test: | build
+	gcc -O2 \
+	    -I third_party/hand-isomorphism \
+	    -c third_party/hand-isomorphism/hand_index.c -o build/hand_index.o
+	gcc -O2 \
+	    -I third_party/hand-isomorphism \
+	    -c third_party/hand-isomorphism/deck.c -o build/deck.o
+	g++ -std=c++20 -O2 \
+	    $(wildcard cppsrc/test/*.cpp) \
+	    cppsrc/CFRGame.cpp \
+	    cppsrc/DeepCFR.cpp \
+	    cppsrc/Scheduler.cpp \
+	    third_party/OMPEval/HandEvaluator.cpp \
+	    build/hand_index.o build/deck.o \
+	    -I cppsrc \
+	    -I third_party/OMPEval \
+	    -I third_party/hand-isomorphism \
+	    -I $(GTEST_INC) \
+	    -L $(GTEST_LIB) -lgtest -lgtest_main -lpthread \
+	    -Wl,-rpath,$(GTEST_LIB) \
+	    -o build/cfr_tests
+	./build/cfr_tests
 
 build:
 	$(MKDIR_BUILD)

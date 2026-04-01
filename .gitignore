@@ -5,6 +5,9 @@ build/
 *.pyd
 *.so
 
+# IDE configuration (machine-specific paths)
+.vscode/
+
 # Solver output
 *.npy
 *.bin

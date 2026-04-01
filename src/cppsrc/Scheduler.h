@@ -47,7 +47,6 @@ class Scheduler {
     bool batchComplete = false;   // Python → C++: results written to pendingOutputs
 
     // ---- Internal -----------------------------------------------------------
-    static constexpr int BATCH_SIZE = 4096;
     void flushBatch();
 
     friend struct InferenceAwaitable;

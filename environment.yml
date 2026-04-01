@@ -8,6 +8,7 @@ dependencies:
   - matplotlib
   - pybind11
   - faiss-gpu       # required for all clustering pipelines
+  - gtest           # required for C++ unit tests (make test)
   - pip
   - pip:
       - setuptools>=42.0.0

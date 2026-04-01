@@ -101,7 +101,6 @@ int CFRGame::isTerminalState(const Action& a){ // 2 showdown, 1 fold, 0 continue
 
 bool CFRGame::stm(){ return history[ply].stm; }
 
-Action CFRGame::lastAction(){ return history[ply].act; }
 
 void CFRGame::makeMove(const Action& a){
     bool streetEnded = endsStreet(a);
