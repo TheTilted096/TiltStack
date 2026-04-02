@@ -29,7 +29,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 
 # ---------------------------------------------------------------------------
 # Constants — must match CFRTypes.h
@@ -145,11 +145,31 @@ def decode_batch(raw: np.ndarray):
 # Network
 # ---------------------------------------------------------------------------
 
+class ResidualBlock(nn.Module):
+    """A standard 2-layer residual block for MLPs."""
+    def __init__(self, dim: int = 256):
+        super().__init__()
+        self.fc1 = nn.Linear(dim, dim)
+        self.fc2 = nn.Linear(dim, dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # The internal non-linear transformation
+        out = F.relu(self.fc1(x))
+        out = self.fc2(out)
+
+        # The skip connection adds the original input back IN FRONT of the final ReLU
+        return F.relu(out + x)
+
+
 class DeepCFRNet(nn.Module):
     """
     Shared architecture for both the advantage and strategy networks.
 
-        Input (338) → Linear(256) → ReLU → Linear(256) → ReLU → Linear(5)
+        Input (338) → Linear(256) → ReLU
+                   → ResNet(256) → ReLU  (skip connection: ReLU(linear + input))
+                   → ResNet(256) → ReLU  (skip connection: ReLU(linear + input))
+                   → ResNet(256) → ReLU  (skip connection: ReLU(linear + input))
+                   → Linear(256 → 5)
 
     Street buckets are passed as integer indices (N, 3) — columns are flop,
     turn, river — and embedded into EMBED_DIM-dimensional vectors before
@@ -164,13 +184,11 @@ class DeepCFRNet(nn.Module):
         self.flop_embed  = nn.Embedding(FLOP_BUCKETS,  embed_dim, padding_idx=0)
         self.turn_embed  = nn.Embedding(TURN_BUCKETS,  embed_dim, padding_idx=0)
         self.river_embed = nn.Embedding(RIVER_BUCKETS, embed_dim, padding_idx=0)
-        self.net = nn.Sequential(
-            nn.Linear(INPUT_DIM, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, NUM_ACTIONS),
-        )
+        self.linear1 = nn.Linear(INPUT_DIM, 256)
+        self.res_block1 = ResidualBlock(256)
+        self.res_block2 = ResidualBlock(256)
+        self.res_block3 = ResidualBlock(256)
+        self.output = nn.Linear(256, NUM_ACTIONS)
 
     def forward(self, x_cont: torch.Tensor, buckets: torch.Tensor) -> torch.Tensor:
         """
@@ -183,7 +201,17 @@ class DeepCFRNet(nn.Module):
         e_river = self.river_embed(buckets[:, 2])  # (N, 32)
         embeds  = torch.cat([e_flop, e_turn, e_river], dim=1)  # (N, 96)
         x = torch.cat([x_cont, embeds], dim=1)                 # (N, 338)
-        return self.net(x)
+
+        # First linear layer
+        x = F.relu(self.linear1(x))  # (N, 256)
+
+        # Three 2-layer residual blocks
+        x = self.res_block1(x)
+        x = self.res_block2(x)
+        x = self.res_block3(x)
+
+        # Output layer
+        return self.output(x)
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +298,45 @@ class Reservoir:
 
 
 # ---------------------------------------------------------------------------
+# Lazy-decode Dataset
+#
+# Decoding is deferred to DataLoader workers so each mini-batch is decoded in
+# parallel rather than the entire reservoir being decoded upfront in a single
+# thread.  Workers receive raw uint8 rows and call decode_batch on their own
+# slice, eliminating the long synchronous stall before training begins.
+# ---------------------------------------------------------------------------
+
+class _InfoSetDataset(Dataset):
+    def __init__(self, raw, targets, weights=None):
+        self.raw     = raw      # (N, INFOSET_BYTES) uint8
+        self.targets = targets  # (N, NUM_ACTIONS)   float32
+        self.weights = weights  # (N,)               int32 | None
+
+    def __len__(self):
+        return len(self.raw)
+
+    def __getitem__(self, idx):
+        if self.weights is not None:
+            return self.raw[idx], self.targets[idx], self.weights[idx]
+        return self.raw[idx], self.targets[idx]
+
+
+def _collate_adv(batch):
+    raw     = np.stack([b[0] for b in batch])
+    targets = np.stack([b[1] for b in batch])
+    x_cont, buckets = decode_batch(raw)
+    return x_cont, buckets, torch.from_numpy(targets)
+
+
+def _collate_pol(batch):
+    raw     = np.stack([b[0] for b in batch])
+    targets = np.stack([b[1] for b in batch])
+    weights = np.stack([b[2] for b in batch]).astype(np.float32)
+    x_cont, buckets = decode_batch(raw)
+    return x_cont, buckets, torch.from_numpy(targets), torch.from_numpy(weights)
+
+
+# ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
 
@@ -286,19 +353,17 @@ def train_advantage(
     Train the advantage network with MSE loss on the regret targets.
     Returns the mean loss over the final epoch.
     """
-    x_cont, buckets = decode_batch(raw_inputs)
-    y = torch.from_numpy(targets)
-
-    dataset = TensorDataset(x_cont, buckets, y)
+    dataset = _InfoSetDataset(raw_inputs, targets)
     loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True,
-                         pin_memory=True, num_workers=0)
+                         collate_fn=_collate_adv, pin_memory=True,
+                         num_workers=8, persistent_workers=True)
     net.train()
     losses = []
 
     for _ in range(epochs):
         total = 0.0
         for xc, b, t in loader:
-            xc, b, t = xc.to(device), b.to(device), t.to(device)
+            xc, b, t = xc.to(device, non_blocking=True), b.to(device, non_blocking=True), t.to(device, non_blocking=True)
             optimizer.zero_grad()
             # Illegal actions are stored as NaN; exclude them from the loss so
             # the network does not learn a spurious target of 0 for those slots.
@@ -339,13 +404,10 @@ def train_policy(
     Returns per-epoch mean losses.
     """
     import time as _time
-    x_cont, buckets = decode_batch(raw_inputs)
-    y = torch.from_numpy(targets)
-    w = torch.from_numpy(weights.astype(np.float32))
-
-    dataset = TensorDataset(x_cont, buckets, y, w)
+    dataset = _InfoSetDataset(raw_inputs, targets, weights)
     loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True,
-                         pin_memory=True, num_workers=0)
+                         collate_fn=_collate_pol, pin_memory=True,
+                         num_workers=8, persistent_workers=True)
     net.train()
     losses = []
 
@@ -353,7 +415,8 @@ def train_policy(
         ep_t0 = _time.perf_counter()
         total = 0.0
         for xc, b, t, wt in loader:
-            xc, b, t, wt = xc.to(device), b.to(device), t.to(device), wt.to(device)
+            xc, b, t, wt = (xc.to(device, non_blocking=True), b.to(device, non_blocking=True),
+                             t.to(device, non_blocking=True), wt.to(device, non_blocking=True))
             optimizer.zero_grad()
             # Normalise weights within the mini-batch so they sum to 1,
             # preventing the loss magnitude from scaling with iteration number.
