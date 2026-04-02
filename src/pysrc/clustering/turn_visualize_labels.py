@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Visualize flop bucket label distribution and centroid structure.
+"""Visualize turn bucket label distribution and centroid structure.
 
-Reads the binary flop_labels.bin (1.28M uint16 cluster labels) and
-optionally flop_centroids.npy (Kx256 float32) to produce diagnostic
+Reads the binary turn_labels.bin (55M uint16 cluster labels) and
+optionally turn_centroids.npy (Kx256 float32) to produce diagnostic
 figures plus console summary statistics.
 
-Flop centroids are 256-dim CDF vectors over wide turn buckets (raw counts,
-NOT divided by 47.0, so values range from 0 to 47).  Expected EHS is computed
+Turn centroids are 256-dim CDF vectors over wide river buckets (raw counts,
+NOT divided by 46.0, so values range from 0 to 46).  Expected EHS is computed
 by converting each CDF centroid back to a PDF via finite differences, then
-computing (pdf @ wide_turn_ehs) / (47.0 * 46.0 * 255.0), where wide_turn_ehs
-(in [0, 46*255] scale) is derived from turn_centroids.npy and river_centroids.npy.
+computing (pdf @ wide_ehs) / (46.0 * 255.0), where wide_ehs (0-255 scale) is
+derived from river_centroids.npy.
 """
 
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import matplotlib
@@ -21,17 +22,16 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # ── Paths ─────────────────────────────────────────────────────────────
-OUTPUT_DIR            = os.path.join(os.path.dirname(__file__), "..", "clusters")
-LABELS_PATH           = os.path.join(OUTPUT_DIR, "flop_labels.bin")
-CENTROIDS_PATH        = os.path.join(OUTPUT_DIR, "flop_centroids.npy")
-EHS_PATH              = os.path.join(OUTPUT_DIR, "flop_ehs.bin")
-OUTPUT_PATH           = os.path.join(OUTPUT_DIR, "flop_labels_viz.png")
-K                     = 2048
-
+OUTPUT_DIR   = Path(__file__).parent.parent.parent / "clusters"
+LABELS_PATH          = OUTPUT_DIR / "turn_labels.bin"
+CENTROIDS_PATH       = OUTPUT_DIR / "turn_centroids.npy"
+EHS_PATH             = OUTPUT_DIR / "turn_ehs.bin"
+OUTPUT_PATH          = OUTPUT_DIR / "turn_labels_viz.png"
+K                    = 8192
 
 
 # ── Data loading ─────────────────────────────────────────────────────
-def load_label_counts(path, k, chunk=1_000_000):
+def load_label_counts(path, k, chunk=10_000_000):
     """Memory-map labels and compute per-cluster counts in chunks."""
     labels = np.memmap(path, dtype=np.uint16, mode="r")
     n = len(labels)
@@ -43,8 +43,13 @@ def load_label_counts(path, k, chunk=1_000_000):
 
 
 def load_counts_and_examples(path, k, cluster_ids, n_examples=5, seed=None,
-                             chunk=1_000_000):
-    """Single-pass scan: compute per-cluster counts and collect reservoir samples."""
+                             chunk=10_000_000):
+    """Single-pass scan: compute per-cluster counts and collect reservoir samples.
+
+    Combining both operations avoids a second full read of the labels file.
+    Reservoir sampling guarantees each returned index is chosen uniformly over
+    all matching states.
+    """
     rng = np.random.default_rng(seed)
     labels = np.memmap(path, dtype=np.uint16, mode="r")
     n = len(labels)
@@ -98,11 +103,21 @@ def load_centroids(path):
 def try_import_hand_indexer():
     """Try to import the hand_indexer pybind module."""
     try:
-        from hand_indexer import FlopIndexer
-        return FlopIndexer()
+        from hand_indexer import TurnIndexer
+        return TurnIndexer()
     except ImportError as e:
         print(f"WARNING: {e} — example hands will be skipped.", file=sys.stderr)
         return None
+
+
+def find_example_indices(labels_path, cluster_ids, n_examples=5, seed=None,
+                         chunk=10_000_000):
+    """Scan labels memmap to find n_examples random hand indices per cluster."""
+    _, _, reservoir = load_counts_and_examples(
+        labels_path, max(cluster_ids) + 1, cluster_ids,
+        n_examples=n_examples, seed=seed, chunk=chunk,
+    )
+    return reservoir
 
 
 
@@ -118,7 +133,7 @@ def gini(counts):
 def print_stats(counts, n, k):
     used = np.count_nonzero(counts)
     print(f"\n{'='*60}")
-    print(f"  Flop Label Statistics")
+    print(f"  Turn Label Statistics")
     print(f"{'='*60}")
     print(f"  Total labels:    {n:>16,}")
     print(f"  Clusters (K):    {k:>16,}")
@@ -152,7 +167,8 @@ def plot_cluster_sizes(axes, counts, n):
     """Three distribution plots: histogram, rank-size, CDF."""
     ax1, ax2, ax3 = axes
 
-    ax1.hist(counts, bins=100, color="#2196F3", edgecolor="none", alpha=0.85)
+    # 1) Histogram of cluster sizes
+    ax1.hist(counts, bins=200, color="#2196F3", edgecolor="none", alpha=0.85)
     ax1.set_yscale("log")
     ax1.set_xlabel("Hands per cluster")
     ax1.set_ylabel("Number of clusters (log)")
@@ -163,6 +179,7 @@ def plot_cluster_sizes(axes, counts, n):
                 label=f"median={int(np.median(counts)):,}")
     ax1.legend(fontsize=8)
 
+    # 2) Rank-size (log-log)
     sorted_desc = np.sort(counts)[::-1]
     ranks = np.arange(1, len(sorted_desc) + 1)
     ax2.loglog(ranks, sorted_desc, color="#4CAF50", lw=0.8)
@@ -171,6 +188,7 @@ def plot_cluster_sizes(axes, counts, n):
     ax2.set_title("Rank–Size Plot (log-log)")
     ax2.grid(True, alpha=0.3, which="both")
 
+    # 3) CDF — fraction of hands covered by top N clusters
     cumulative = np.cumsum(sorted_desc) / n
     ax3.plot(ranks / len(ranks) * 100, cumulative * 100, color="#9C27B0", lw=1.5)
     ax3.set_xlabel("Top N% of clusters")
@@ -183,7 +201,7 @@ def plot_cluster_sizes(axes, counts, n):
     pct50 = idx50 / len(ranks) * 100
     ax3.annotate(f"50% at top {pct50:.1f}%", xy=(pct50, 50),
                  fontsize=8, color="#9C27B0",
-                 xytext=(pct50 + 5, 40),
+                 xytext=(pct50 + 10, 40),
                  arrowprops=dict(arrowstyle="->", color="#9C27B0"))
 
 
@@ -204,7 +222,7 @@ RANK_EXPAND  = {"T": "10"}
 
 
 def render_hand_line(ax, hand_str, x0, y, fontsize=9):
-    """Render a hand like 'Ah Kd | Qs Jc 7h' with colored suit symbols."""
+    """Render a hand like 'Ah Kd | Qs Jc 7h Td' with colored suit symbols."""
     x = x0
     cw = 0.015
     parts = hand_str.split("|")
@@ -275,8 +293,9 @@ def plot_representatives(centroids, counts, expected_ehs, proj, var_explained,
     fig.suptitle("Representative Cluster Deep-Dive", fontsize=14,
                  fontweight="bold", y=0.98)
 
+    # Left: PCA (all points) with representatives highlighted
     ax1.scatter(proj[:, 0], proj[:, 1], c=expected_ehs, cmap="RdYlGn",
-                vmin=0, vmax=1, s=1.5, alpha=0.5, rasterized=True)
+                vmin=0, vmax=1, s=0.5, alpha=0.4, rasterized=True)
     for i, ci in enumerate(reps):
         ax1.scatter(proj[ci, 0], proj[ci, 1],
                     c=[rep_colors[i]], s=120, marker=REP_MARKERS[i],
@@ -284,9 +303,10 @@ def plot_representatives(centroids, counts, expected_ehs, proj, var_explained,
                     label=rep_labels[i])
     ax1.set_xlabel(f"PC1 ({var_explained[0]:.1f}% var)", fontsize=11)
     ax1.set_ylabel(f"PC2 ({var_explained[1]:.1f}% var)", fontsize=11)
-    ax1.set_title("PCA of Flop Centroids (color = E[EHS])", fontsize=12)
+    ax1.set_title("PCA of Turn Centroids (color = E[EHS])", fontsize=12)
     ax1.legend(fontsize=7.5, loc="upper left", markerscale=0.8, ncol=2)
 
+    # Right: Rank-size with representatives marked
     sorted_desc = np.sort(counts)[::-1]
     ranks_arr = np.arange(1, len(sorted_desc) + 1)
     ax2.loglog(ranks_arr, sorted_desc, color="#BBBBBB", lw=0.8, zorder=1)
@@ -319,7 +339,7 @@ def plot_hands(counts, expected_ehs, output_path, hand_examples):
 
     fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(16, 13))
     fig.subplots_adjust(wspace=0.05)
-    fig.suptitle("Example Hands by E[EHS] Percentile (hole | flop board)",
+    fig.suptitle("Example Hands by E[EHS] Percentile (hole | board)",
                  fontsize=14, fontweight="bold", y=0.98)
 
     for ax_col, start_i, count in [(ax_left, 0, n_left),
@@ -365,13 +385,13 @@ def main():
     if not os.path.isfile(labels_path):
         sys.exit(f"Error: labels file not found: {labels_path}")
 
-    # Load flop centroids
+    # Load centroids
     centroids = load_centroids(centroids_path)
     has_centroids = centroids is not None
     if has_centroids:
-        print(f"Flop centroids loaded: {centroids.shape}")
+        print(f"Turn centroids loaded: {centroids.shape}")
     else:
-        print(f"No flop centroids found at {centroids_path} — skipping centroid plots.")
+        print(f"No turn centroids found at {centroids_path} — skipping centroid plots.")
 
     # Load E[EHS] per cluster from file.
     expected_ehs = proj = var_explained = None
@@ -416,7 +436,7 @@ def main():
     # ── Figure 1: Distribution overview (1×3) ────────────────────────
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     fig.suptitle(
-        f"Flop Bucket Label Analysis — {n:,} hands  ×  {k:,} clusters",
+        f"Turn Bucket Label Analysis — {n:,} hands  ×  {k:,} clusters",
         fontsize=14, fontweight="bold", y=1.01)
     plot_cluster_sizes(axes, counts, n)
     plt.tight_layout()
@@ -437,7 +457,7 @@ def main():
         if hand_examples is not None:
             plot_hands(counts, expected_ehs, hands_path, hand_examples)
         else:
-            print("Skipping example hands (FlopIndexer not available).")
+            print("Skipping example hands (TurnIndexer not available).")
 
 
 if __name__ == "__main__":

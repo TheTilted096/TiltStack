@@ -41,11 +41,11 @@ all: hand_indexer deepcfr
 
 hand_indexer: | build
 	$(PYTHON) setup.py build_ext --build-lib=build --build-temp=build/temp
-	cp -f build/hand_indexer*.so pysrc/
+	cp -f build/hand_indexer*.so pysrc/clustering/
 
 deepcfr: | build
 	$(PYTHON) setup_deepcfr.py build_ext --build-lib=build --build-temp=build/temp
-	cp -f build/deepcfr*.so pysrc/
+	cp -f build/deepcfr*.so pysrc/deepcfr/
 
 test: | build
 	gcc -O2 \
@@ -56,12 +56,12 @@ test: | build
 	    -c third_party/hand-isomorphism/deck.c -o build/deck.o
 	g++ -std=c++20 -O2 \
 	    $(wildcard cppsrc/test/*.cpp) \
-	    cppsrc/CFRGame.cpp \
-	    cppsrc/DeepCFR.cpp \
-	    cppsrc/Scheduler.cpp \
+	    cppsrc/deepcfr/CFRGame.cpp \
+	    cppsrc/deepcfr/DeepCFR.cpp \
+	    cppsrc/deepcfr/Scheduler.cpp \
 	    third_party/OMPEval/HandEvaluator.cpp \
 	    build/hand_index.o build/deck.o \
-	    -I cppsrc \
+	    -I cppsrc/deepcfr \
 	    -I third_party/OMPEval \
 	    -I third_party/hand-isomorphism \
 	    -I $(GTEST_INC) \
@@ -79,7 +79,7 @@ tidy:
 
 # ---------------------------------------------------------------------------
 clean:
-	rm -rf build checkpoints br_checkpoints *.egg-info pysrc/hand_indexer.* pysrc/deepcfr.*
+	rm -rf build checkpoints br_checkpoints *.egg-info pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*
 
 clean-hard:
-	rm -rf build clusters *.egg-info pysrc/hand_indexer.* pysrc/deepcfr.*
+	rm -rf build clusters *.egg-info pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*

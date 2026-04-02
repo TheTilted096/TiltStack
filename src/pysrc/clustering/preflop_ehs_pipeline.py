@@ -38,7 +38,7 @@ import hand_indexer
 # Fixed paths
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR          = Path("clusters")
+OUTPUT_DIR   = Path(__file__).parent.parent.parent / "clusters"
 FLOP_EHS_FINE_PATH  = OUTPUT_DIR / "flop_ehs_fine.bin"
 PREFLOP_EHS_PATH    = OUTPUT_DIR / "preflop_ehs_fine.bin"
 

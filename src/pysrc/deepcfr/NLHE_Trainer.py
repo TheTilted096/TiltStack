@@ -30,6 +30,7 @@ Player convention
 import os
 import time
 import argparse
+from pathlib import Path
 import numpy as np
 import torch
 
@@ -164,7 +165,7 @@ def main():
     parser.add_argument("--seed",       type=int,   default=None)
     args = parser.parse_args()
 
-    ckpt_dir = "checkpoints"
+    ckpt_dir = Path(__file__).parent.parent.parent / "checkpoints"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -185,7 +186,7 @@ def main():
 
     seed = 0xdeadbeefcafe1234 if args.seed is None else args.seed
     orch = deepcfr.Orchestrator(args.threads, seed)
-    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     adv_res   = [Reservoir(RESERVOIR_CAPACITY, deepcfr.INFOSET_BYTES)
                  for _ in range(2)]

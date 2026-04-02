@@ -33,10 +33,10 @@ setup(
         Extension(
             'hand_indexer',
             sources=[
-                'cppsrc/bindings.cpp',
-                'cppsrc/river_expander.cpp',
-                'cppsrc/turn_expander.cpp',
-                'cppsrc/flop_expander.cpp',
+                'cppsrc/clustering/bindings.cpp',
+                'cppsrc/clustering/river_expander.cpp',
+                'cppsrc/clustering/turn_expander.cpp',
+                'cppsrc/clustering/flop_expander.cpp',
                 'third_party/OMPEval/HandEvaluator.cpp',
                 'third_party/hand-isomorphism/hand_index.c',
                 'third_party/hand-isomorphism/deck.c',

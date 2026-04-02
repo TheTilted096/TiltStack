@@ -22,14 +22,13 @@ static void primeGlobals() {
         std::swap(deck[i], deck[j]);
     }
 
-    hand_indexer_t idx;
     uint8_t rounds[] = {2, 3, 1, 1};
-    hand_indexer_init(4, rounds, &idx);
+    hand_indexer_init(4, rounds, &g_indexer);
     for (int p = 0; p < 2; p++) {
         uint8_t cards[7] = {deck[p * 2], deck[p * 2 + 1], deck[4], deck[5],
                             deck[6],     deck[7],         deck[8]};
         hand_index_t indices[4];
-        hand_index_all(&idx, cards, indices);
+        hand_index_all(&g_indexer, cards, indices);
         for (int r = 0; r < 4; r++) {
             auto i = static_cast<std::size_t>(indices[r]);
             if (i >= gEHS[r].size())
@@ -38,7 +37,6 @@ static void primeGlobals() {
                 gLabels[r].resize(i + 1, 0);
         }
     }
-    hand_indexer_free(&idx);
 }
 
 // Construct a fresh game with a deterministic deal.

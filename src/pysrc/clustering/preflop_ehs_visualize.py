@@ -14,6 +14,7 @@ Nathaniel Potter, 03-27-2026
 
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import matplotlib
@@ -21,10 +22,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
-OUTPUT_DIR   = os.path.join(os.path.dirname(__file__), "..", "clusters")
-EHS_PATH     = os.path.join(OUTPUT_DIR, "preflop_ehs_fine.bin")
-MATRIX_OUT   = os.path.join(OUTPUT_DIR, "preflop_ehs_matrix.png")
-RANKING_OUT  = os.path.join(OUTPUT_DIR, "preflop_ehs_ranking.png")
+OUTPUT_DIR   = Path(__file__).parent.parent.parent / "clusters"
+EHS_PATH     = OUTPUT_DIR / "preflop_ehs_fine.bin"
+MATRIX_OUT   = OUTPUT_DIR / "preflop_ehs_matrix.png"
+RANKING_OUT  = OUTPUT_DIR / "preflop_ehs_ranking.png"
 
 NUM_HANDS = 169
 

@@ -21,6 +21,7 @@ Player convention (same as NLHE_Trainer)
 import os
 import time
 import argparse
+from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -138,7 +139,7 @@ def save_final_advantages(ckpt_dir, t, adv_nets):
     """Save only the final two advantage networks."""
     paths = []
     for i in range(2):
-        path = os.path.join(ckpt_dir, f"br_adv{i}_{t:04d}.pt")
+        path = ckpt_dir / f"br_adv{i}_{t:04d}.pt"
         torch.save({
             "t": t,
             "net": adv_nets[i].state_dict(),
@@ -172,14 +173,14 @@ def main():
         help="Path to a TiltStack checkpoint containing the trained strat_net")
     parser.add_argument("--iters",      type=int,   default=60)
     parser.add_argument("--threads",    type=int,   default=16)
-    parser.add_argument("--samples",    type=int,   default=2_000_000,
-        help="Target advantage samples per player per iteration  (default: 2M)")
+    parser.add_argument("--samples",    type=int,   default=5_000_000,
+        help="Target advantage samples per player per iteration  (default: 5M)")
     parser.add_argument("--batch",      type=int,   default=8192)
     parser.add_argument("--lr",         type=float, default=3e-4)
     parser.add_argument("--seed",       type=int,   default=None)
     args = parser.parse_args()
 
-    ckpt_dir = "br_checkpoints"
+    ckpt_dir = Path(__file__).parent.parent.parent / "br_checkpoints"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -201,7 +202,7 @@ def main():
 
     seed = 0xdeadbeefcafe1234 if args.seed is None else args.seed
     orch = deepcfr.Orchestrator(args.threads, seed)
-    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     adv_res = [Reservoir(RESERVOIR_CAPACITY, deepcfr.INFOSET_BYTES)
                for _ in range(2)]
@@ -270,7 +271,7 @@ def main():
 
     # ---- Final advantage networks -------------------------------------------
     paths = save_final_advantages(ckpt_dir, args.iters, adv_nets)
-    print(f"[{_ts()}] ==> Done.  Final advantage networks → {', '.join(p.split('/')[-1] for p in paths)}")
+    print(f"[{_ts()}] ==> Done.  Final advantage networks → {', '.join(p.name for p in paths)}")
 
 
 if __name__ == "__main__":

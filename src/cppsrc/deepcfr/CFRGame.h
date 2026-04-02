@@ -2,9 +2,9 @@
 #include "CFRUtils.h"
 // Include OMPEval before hand-isomorphism: deck.h defines CARDS/RANKS/SUITS
 // macros that collide with OMPEval identifiers.
-#include "../third_party/OMPEval/HandEvaluator.h"
+#include "../../third_party/OMPEval/HandEvaluator.h"
 extern "C" {
-#include "../third_party/hand-isomorphism/hand_index.h"
+#include "../../third_party/hand-isomorphism/hand_index.h"
 }
 
 // Single shared indexer for all CFRGame instances.  Initialized once before

@@ -55,7 +55,7 @@ from flop_clusterer import (assign_flop_labels, gpu_available,
 # Fixed paths
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR            = Path("clusters")
+OUTPUT_DIR   = Path(__file__).parent.parent.parent / "clusters"
 TURN_LABELS_PATH      = OUTPUT_DIR / "turn_labels.bin"
 TURN_EHS_FINE_PATH    = OUTPUT_DIR / "turn_ehs_fine.bin"
 CENTROIDS_PATH        = OUTPUT_DIR / "flop_centroids.npy"

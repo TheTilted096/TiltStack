@@ -86,7 +86,7 @@ def train_turn_centroids(sample: np.ndarray, k: int, niter: int,
 def assign_turn_labels_and_ehs_fine_streaming(
         expander, centroids: np.ndarray,
         labels_path: str, ehs_fine_path: str,
-        batch_size: int = 500_000) -> np.ndarray:
+        batch_size: int = 3_000_000) -> np.ndarray:
     """Assign cluster labels and write per-state EHS to disk in a single pass.
 
     Uses expander.expand_all_with_ehs_mult() to stream histograms, EHS values,
