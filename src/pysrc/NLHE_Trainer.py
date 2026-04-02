@@ -239,6 +239,7 @@ def main():
             orch.wait_iteration()
             rollout_secs = time.perf_counter() - t0
 
+            rollouts = sum(s.rollout_count() for s in orch.schedulers)
             collect_into_reservoirs(orch, hero, adv_res, strat_res)
             orch.clear_buffers()
 
@@ -249,11 +250,12 @@ def main():
             cap_str   = _fmt(RESERVOIR_CAPACITY)
 
             print(f"\n  [P{player} rollout]  {rollout_secs:.1f}s"
-                  f"  ·  {_rate(adv_new + pol_new, rollout_secs)}")
-            print(f"    adv  +{_fmt(adv_new):<12}"
-                  f"  res  {_fmt(adv_size):>12} / {cap_str}")
-            print(f"    pol  +{_fmt(pol_new):<12}"
-                  f"  res  {_fmt(pol_size):>12} / {cap_str}")
+                  f"  ·  rollouts={_fmt(rollouts)}"
+                  f"  ·  {_rate(adv_new + pol_new, rollout_secs)} infosets/s")
+            print(f"    advantage  +{_fmt(adv_new):<12}"
+                  f"  reservoir  {_fmt(adv_size):>12} / {cap_str}")
+            print(f"    policy     +{_fmt(pol_new):<12}"
+                  f"  reservoir  {_fmt(pol_size):>12} / {cap_str}")
 
             # -- Advantage training -------------------------------------------
             n_adv = adv_res[player].size
@@ -270,10 +272,10 @@ def main():
                 )
                 train_secs = time.perf_counter() - t0
                 loss_str   = "  ".join(f"{l:.5f}" for l in losses)
-                print(f"\n  [P{player} adv]  n={_fmt(n_adv)}"
+                print(f"\n  [P{player} advantage]  samples={_fmt(n_adv)}"
                       f"  ·  loss={loss_str}"
                       f"  ·  {train_secs:.1f}s"
-                      f"  ·  {_rate(n_adv * args.epochs, train_secs)}")
+                      f"  ·  {_rate(n_adv * args.epochs, train_secs)} samples/s")
 
         # -- Iteration summary ------------------------------------------------
         iter_elapsed = time.perf_counter() - iter_start
@@ -293,10 +295,13 @@ def main():
     strat_epochs = 10
     n_pol = strat_res.size
     print(f"[{_ts()}] ==> Strategy network\n"
-          f"  n={_fmt(n_pol)}  ·  {strat_epochs} epochs\n")
+          f"  samples={_fmt(n_pol)}  ·  {strat_epochs} epochs\n")
+
+    def _strat_epoch_cb(ep, loss, secs):
+        print(f"    ep {ep:2d} / {strat_epochs}   loss = {loss:.5f}  ·  {secs:.1f}s")
 
     t0 = time.perf_counter()
-    losses = train_policy(
+    train_policy(
         strat_net, strat_opt,
         strat_res.inputs [:n_pol],
         strat_res.targets[:n_pol],
@@ -304,12 +309,10 @@ def main():
         batch_size=args.batch,
         epochs=strat_epochs,
         device=device,
+        epoch_callback=_strat_epoch_cb,
     )
     strat_secs = time.perf_counter() - t0
-
-    for ep, l in enumerate(losses, 1):
-        print(f"    ep {ep:2d} / {strat_epochs}   loss = {l:.5f}")
-    print(f"\n  {strat_secs:.1f}s  ·  {_rate(n_pol * strat_epochs, strat_secs)}\n")
+    print(f"\n  {strat_secs:.1f}s  ·  {_rate(n_pol * strat_epochs, strat_secs)} samples/s\n")
 
     path = save_checkpoint(
         args.ckpt_dir, args.iters,

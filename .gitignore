@@ -2,6 +2,7 @@ __pycache__/
 
 # PyBind11 build artifacts
 build/
+checkpoints/
 *.pyd
 *.so
 

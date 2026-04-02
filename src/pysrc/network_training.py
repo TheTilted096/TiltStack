@@ -322,7 +322,8 @@ def train_policy(
     batch_size: int = 4096,
     epochs: int = 1,
     device: torch.device = torch.device('cuda'),
-) -> float:
+    epoch_callback=None,       # called as epoch_callback(ep, loss, secs) after each epoch
+) -> list[float]:
     """
     Train the strategy network with iteration-weighted cross-entropy loss.
 
@@ -335,8 +336,9 @@ def train_policy(
     it was collected). This follows the DeepCFR paper's linear weighting scheme,
     which up-weights more recent strategy samples.
 
-    Returns the mean loss over the final epoch.
+    Returns per-epoch mean losses.
     """
+    import time as _time
     x_cont, buckets = decode_batch(raw_inputs)
     y = torch.from_numpy(targets)
     w = torch.from_numpy(weights.astype(np.float32))
@@ -347,7 +349,8 @@ def train_policy(
     net.train()
     losses = []
 
-    for _ in range(epochs):
+    for ep in range(1, epochs + 1):
+        ep_t0 = _time.perf_counter()
         total = 0.0
         for xc, b, t, wt in loader:
             xc, b, t, wt = xc.to(device), b.to(device), t.to(device), wt.to(device)
@@ -362,6 +365,9 @@ def train_policy(
             loss.backward()
             optimizer.step()
             total += loss.item()
-        losses.append(total / len(loader))
+        mean_loss = total / len(loader)
+        losses.append(mean_loss)
+        if epoch_callback is not None:
+            epoch_callback(ep, mean_loss, _time.perf_counter() - ep_t0)
 
     return losses

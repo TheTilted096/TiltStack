@@ -34,6 +34,7 @@ int Scheduler::purgeCompleted() {
         }
     }
     tasks = std::move(alive);
+    completedRollouts += completed;
     return completed;
 }
 
@@ -58,6 +59,7 @@ void Scheduler::clearBuffers() {
     policyInputs.clear();
     policyOutputs.clear();
     policyWeights.clear();
+    completedRollouts = 0;
 }
 
 std::size_t Scheduler::enqueueInference(InfoSet input, Handle handle) {

@@ -132,10 +132,15 @@ PYBIND11_MODULE(deepcfr, m) {
                      reinterpret_cast<float *>(s.policyOutputData()),
                      s.policySize(), (ssize_t)NUM_ACTIONS, self);
              })
-        .def("policy_weight_data", [](py::object self) {
-            auto &s = self.cast<Scheduler &>();
-            return asArray1D<int>(s.policyWeightData(), s.policySize(), self);
-        });
+        .def("policy_weight_data",
+             [](py::object self) {
+                 auto &s = self.cast<Scheduler &>();
+                 return asArray1D<int>(s.policyWeightData(), s.policySize(),
+                                      self);
+             })
+
+        // -- Rollout counter --------------------------------------------------
+        .def("rollout_count", &Scheduler::rolloutCount);
 
     // -------------------------------------------------------------------------
     // Orchestrator

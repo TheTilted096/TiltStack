@@ -1,13 +1,8 @@
 #include "CFRGame.h"
 
-CFRGame::CFRGame() {
-    uint8_t rounds[] = {2, 3, 1, 1};
-    hand_indexer_init(4, rounds, &indexer);
+hand_indexer_t g_indexer;
 
-    begin(STARTING_STACK, STARTING_STACK, 0);
-}
-
-CFRGame::~CFRGame() { hand_indexer_free(&indexer); }
+CFRGame::CFRGame() { begin(STARTING_STACK, STARTING_STACK, 0); }
 
 void CFRGame::begin(int ss1, int ss2, bool h) {
     // hero, board/hole cards, stacks, set externally
@@ -47,7 +42,7 @@ void CFRGame::begin(int ss1, int ss2, bool h) {
         uint8_t cards[7] = {deck[p * 2], deck[p * 2 + 1], deck[4], deck[5],
                             deck[6],     deck[7],         deck[8]};
         hand_index_t indices[NUM_ROUNDS];
-        hand_index_all(&indexer, cards, indices);
+        hand_index_all(&g_indexer, cards, indices);
         for (int r = 0; r < NUM_ROUNDS; r++)
             streetIDs[r][p] = indices[r];
     }
@@ -176,8 +171,8 @@ float CFRGame::payout() {
         static omp::HandEvaluator evaluator;
 
         uint8_t cards0[7], cards1[7];
-        hand_unindex(&indexer, 3, streetIDs[3][0], cards0);
-        hand_unindex(&indexer, 3, streetIDs[3][1], cards1);
+        hand_unindex(&g_indexer, 3, streetIDs[3][0], cards0);
+        hand_unindex(&g_indexer, 3, streetIDs[3][1], cards1);
 
         omp::Hand h0 = omp::Hand::empty();
         omp::Hand h1 = omp::Hand::empty();
@@ -284,7 +279,7 @@ InfoSet CFRGame::getInfo() {
     std::memcpy(info.betHist, betHist, sizeof(betHist));
 
     uint8_t canonical[7] = {};
-    hand_unindex(&indexer, roundNum, streetIDs[roundNum][stm], canonical);
+    hand_unindex(&g_indexer, roundNum, streetIDs[roundNum][stm], canonical);
 
     info.hole = (1ULL << canonical[0]) | (1ULL << canonical[1]);
     info.flop = ((1ULL << canonical[2]) | (1ULL << canonical[3]) |

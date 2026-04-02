@@ -64,6 +64,9 @@ class Scheduler {
     std::vector<Strategy> policyOutputs;
     std::vector<int> policyWeights;
 
+    int completedRollouts = 0;
+    int rolloutCount() const { return completedRollouts; }
+
     // ---- C++ interface ------------------------------------------------------
 
     void spawn(Task<float> task);
