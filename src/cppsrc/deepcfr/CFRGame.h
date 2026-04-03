@@ -37,6 +37,12 @@ class CFRGame {
 
     void begin(int, int, bool);
 
+    // Initialise with explicitly provided cards rather than a random shuffle.
+    // cards[9] = {p0h0, p0h1, p1h0, p1h1, flop0, flop1, flop2, turn, river}.
+    // Unreached-street slots may be any unused card index in [0,51]; their
+    // EHS/bucket values are never read before that street is reached.
+    void beginWithCards(int, int, bool, const Card cards[9]);
+
     int isTerminalState(const Action &);
     bool isFold(const Action &);
     bool endsStreet(const Action &);
@@ -50,4 +56,23 @@ class CFRGame {
     float payout();
 
     int generateActions(ActionList &);
+
+    // Apply a bet of amount_milli milli-chips.  The financial state is updated
+    // with the exact amount; the recorded action label is the pot-fraction
+    // abstract action whose fraction is closest to amount_milli / (pot + toCall):
+    //   CHECK  — amount_milli == 0
+    //   CALL   — amount_milli <= toCall
+    //   BET50  — raise fraction < 0.75  (closer to 0.5× pot)
+    //   BET100 — raise fraction >= 0.75 and < all-in  (closer to 1.0× pot)
+    //   ALLIN  — amount_milli >= effective all-in amount (clamped)
+    void makeBet(int amount_milli);
+
+  private:
+    // Shared by begin() and beginWithCards(): zero-initialise all game state
+    // and set up stacks / blinds / the initial BoardState.
+    void initState(int ss1, int ss2, bool h);
+
+    // Index each player's 7-card hand and precompute EHS + cluster buckets for
+    // all streets.  deck[9] = {p0h0, p0h1, p1h0, p1h1, f0, f1, f2, turn, river}.
+    void indexCards(const Card deck[9]);
 };

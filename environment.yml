@@ -16,3 +16,4 @@ dependencies:
   - pip
   - pip:
       - setuptools>=42.0.0
+      - open_spiel            # OpenSpiel game-theory framework (evaluation only)

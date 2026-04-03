@@ -2,3 +2,4 @@ numpy
 faiss-gpu
 pybind11
 matplotlib
+open_spiel

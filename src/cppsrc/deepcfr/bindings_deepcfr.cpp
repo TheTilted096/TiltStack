@@ -2,6 +2,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "CFRGame.h"
 #include "CFRUtils.h"
 #include "Orchestrator.h"
 
@@ -55,6 +56,91 @@ PYBIND11_MODULE(deepcfr, m) {
     // -------------------------------------------------------------------------
     m.def("load_tables", &loadTables, py::arg("clusters_dir"),
           "Load precomputed EHS and cluster-label tables from clusters_dir.");
+
+    // -------------------------------------------------------------------------
+    // CFRGame
+    //
+    // Lightweight game instance for single-hand feature extraction.
+    // Typical evaluation usage:
+    //   game = deepcfr.CFRGame()
+    //   game.begin_with_cards(ss1, ss2, hero, cards9)  # cards9: list of 9 ints
+    //   game.make_move(action)                          # action: int 0-4
+    //   raw = game.get_info()                           # shape (1, 160) uint8
+    //   actions = game.generate_actions()               # list[int]
+    // -------------------------------------------------------------------------
+    py::class_<CFRGame>(m, "CFRGame")
+        .def(py::init<>())
+
+        // begin_with_cards(ss1, ss2, hero, cards) where cards is a list of 9
+        // card indices in [0,51], layout: [p0h0, p0h1, p1h0, p1h1, f0..f2, t, r].
+        // Unreached-street slots (turn/river when on flop) should be filled
+        // with any unused card indices so hand_index_all can run cleanly;
+        // their EHS/bucket values are gated by currentRound in get_info().
+        .def("begin_with_cards",
+             [](CFRGame &g, int ss1, int ss2, bool hero,
+                const std::vector<int> &cards) {
+                 if (cards.size() != 9)
+                     throw std::invalid_argument("cards must have exactly 9 elements");
+                 Card c[9];
+                 for (int i = 0; i < 9; i++)
+                     c[i] = static_cast<Card>(cards[i]);
+                 g.beginWithCards(ss1, ss2, hero, c);
+             },
+             py::arg("ss1"), py::arg("ss2"), py::arg("hero"), py::arg("cards"))
+
+        // make_move(action_int): action is an int matching the Action enum
+        // (CHECK=0, CALL=1, BET50=2, BET100=3, ALLIN=4).
+        .def("make_move",
+             [](CFRGame &g, int a) { g.makeMove(static_cast<Action>(a)); },
+             py::arg("action"))
+
+        // make_bet(amount_milli): apply a continuous bet given as a milli-chip
+        // amount.  Records the nearest pot-fraction abstract action label
+        // (CHECK/CALL/BET50/BET100/ALLIN) while updating financial state with
+        // the exact amount provided.
+        .def("make_bet",
+             [](CFRGame &g, int amount_milli) { g.makeBet(amount_milli); },
+             py::arg("amount_milli"))
+
+        // generate_actions() -> list[int]: legal abstract action indices.
+        .def("generate_actions",
+             [](CFRGame &g) {
+                 ActionList alist;
+                 int n = g.generateActions(alist);
+                 std::vector<int> out;
+                 out.reserve(n);
+                 for (int i = 0; i < n; i++)
+                     out.push_back(static_cast<int>(alist[i]));
+                 return out;
+             })
+
+        // get_info() -> np.ndarray shape (1, INFOSET_BYTES) dtype uint8.
+        // The returned array owns a copy of the InfoSet struct so the CFRGame
+        // object can be mutated freely after this call.
+        .def("get_info",
+             [](const CFRGame &g) {
+                 InfoSet info = const_cast<CFRGame &>(g).getInfo();
+                 auto arr = py::array_t<uint8_t>(
+                     {(ssize_t)1, (ssize_t)sizeof(InfoSet)});
+                 std::memcpy(arr.mutable_data(), &info, sizeof(InfoSet));
+                 return arr;
+             })
+
+        // Read-only state accessors used by the agent for action mapping.
+        .def_property_readonly("pot",
+             [](const CFRGame &g) { return g.history[g.ply].pot; })
+        .def_property_readonly("to_call",
+             [](const CFRGame &g) { return g.history[g.ply].toCall; })
+        .def_property_readonly("stm",
+             [](const CFRGame &g) { return static_cast<int>(g.history[g.ply].stm); })
+        .def_property_readonly("current_round",
+             [](const CFRGame &g) { return static_cast<int>(g.currentRound); })
+        .def_property_readonly("stacks",
+             [](const CFRGame &g) {
+                 return std::vector<int>{g.stacks[0], g.stacks[1]};
+             })
+        .def_property_readonly("is_terminal",
+             [](const CFRGame &g) { return g.isTerminal != 0; });
 
     // -------------------------------------------------------------------------
     // Scheduler

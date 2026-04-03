@@ -2,10 +2,17 @@
 
 hand_indexer_t g_indexer;
 
-CFRGame::CFRGame() { begin(STARTING_STACK, STARTING_STACK, 0); }
+CFRGame::CFRGame() {
+    static bool indexer_ready = false;
+    if (!indexer_ready) {
+        uint8_t rounds[] = {2, 3, 1, 1};
+        hand_indexer_init(4, rounds, &g_indexer);
+        indexer_ready = true;
+    }
+    begin(STARTING_STACK, STARTING_STACK, 0);
+}
 
-void CFRGame::begin(int ss1, int ss2, bool h) {
-    // hero, board/hole cards, stacks, set externally
+void CFRGame::initState(int ss1, int ss2, bool h) {
     ply = 0;
     hero = h;
     isTerminal = false;
@@ -23,8 +30,31 @@ void CFRGame::begin(int ss1, int ss2, bool h) {
     history[0].pot = SMALL_BLIND + BIG_BLIND;
     history[0].toCall = BIG_BLIND - SMALL_BLIND;
     history[0].stm = 0; // little blind
-
     history[0].act = Action::BET50; // big blind does a half pot bet to start
+}
+
+void CFRGame::indexCards(const Card deck[9]) {
+    // deck[0..1] = p0 hole, deck[2..3] = p1 hole, deck[4..8] = board
+    for (int p = 0; p < 2; p++) {
+        uint8_t cards[7] = {deck[p * 2], deck[p * 2 + 1], deck[4], deck[5],
+                            deck[6],     deck[7],         deck[8]};
+        hand_index_t indices[NUM_ROUNDS];
+        hand_index_all(&g_indexer, cards, indices);
+        for (int r = 0; r < NUM_ROUNDS; r++)
+            streetIDs[r][p] = indices[r];
+    }
+
+    // Precompute EHS and cluster bucket for every street and player.
+    for (int r = 0; r < NUM_ROUNDS; r++) {
+        for (int p = 0; p < 2; p++) {
+            streetEHS[r][p] = gEHS[r][streetIDs[r][p]] / 65535.0f;
+            streetBucket[r][p] = gLabels[r][streetIDs[r][p]];
+        }
+    }
+}
+
+void CFRGame::begin(int ss1, int ss2, bool h) {
+    initState(ss1, ss2, h);
 
     // Partial Fisher-Yates: pick 9 unique cards from the 52-card deck.
     Card deck[CARDS];
@@ -37,24 +67,12 @@ void CFRGame::begin(int ss1, int ss2, bool h) {
         std::swap(deck[i], deck[j]);
     }
 
-    // deck[0..1] = p0 hole, deck[2..3] = p1 hole, deck[4..8] = board
-    for (int p = 0; p < 2; p++) {
-        uint8_t cards[7] = {deck[p * 2], deck[p * 2 + 1], deck[4], deck[5],
-                            deck[6],     deck[7],         deck[8]};
-        hand_index_t indices[NUM_ROUNDS];
-        hand_index_all(&g_indexer, cards, indices);
-        for (int r = 0; r < NUM_ROUNDS; r++)
-            streetIDs[r][p] = indices[r];
-    }
+    indexCards(deck);
+}
 
-    // Cards are fully dealt: precompute EHS and bucket for every street and
-    // player.
-    for (int r = 0; r < NUM_ROUNDS; r++) {
-        for (int p = 0; p < 2; p++) {
-            streetEHS[r][p] = gEHS[r][streetIDs[r][p]] / 65535.0f;
-            streetBucket[r][p] = gLabels[r][streetIDs[r][p]];
-        }
-    }
+void CFRGame::beginWithCards(int ss1, int ss2, bool h, const Card cards[9]) {
+    initState(ss1, ss2, h);
+    indexCards(cards);
 }
 
 bool CFRGame::isFold(const Action &a) {
@@ -136,6 +154,49 @@ void CFRGame::makeMove(const Action &a) {
 
     currentRound = static_cast<Round>(roundNum + streetEnded);
 
+    now.stm = streetEnded or !last.stm;
+}
+
+void CFRGame::makeBet(int amount_milli) {
+    const BoardState &last = history[ply];
+    int allinAmt = std::min(stacks[last.stm], last.toCall + stacks[!last.stm]);
+
+    // Classify the bet as the nearest pot-fraction abstract action label.
+    Action a;
+    if (amount_milli == 0) {
+        a = Action::CHECK;
+    } else if (amount_milli <= last.toCall) {
+        a = Action::CALL;
+    } else if (amount_milli >= allinAmt) {
+        a      = Action::ALLIN;
+        amount_milli = allinAmt;   // clamp to avoid over-committing
+    } else {
+        // Raise fraction: raise component above the call / effective pot.
+        int   effPot   = last.pot + last.toCall;
+        float fraction = (effPot > 0)
+            ? static_cast<float>(amount_milli - last.toCall) / effPot
+            : 0.0f;
+        a = (fraction < 0.75f) ? Action::BET50 : Action::BET100;
+    }
+
+    bool streetEnded = endsStreet(a);
+    isTerminal       = isTerminalState(a);
+
+    ply++;
+    BoardState &now = history[ply];
+    now.act    = a;
+    now.pot    = last.pot + amount_milli;
+    now.toCall = amount_milli - last.toCall;
+    stacks[last.stm] -= amount_milli;
+
+    int roundNum = static_cast<int>(currentRound);
+    int numActs  = actionCount[roundNum];
+    actionCount[roundNum]++;
+
+    betHist[roundNum][numActs] =
+        static_cast<float>(now.toCall) / (last.pot + last.toCall);
+
+    currentRound = static_cast<Round>(roundNum + streetEnded);
     now.stm = streetEnded or !last.stm;
 }
 

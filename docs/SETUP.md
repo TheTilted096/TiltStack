@@ -146,6 +146,61 @@ src/clusters/
 
 ---
 
+## Evaluation
+
+### Installing OpenSpiel
+
+OpenSpiel is required only to run the match evaluation pipeline (`src/pysrc/evaluation/`). It is installed automatically via conda:
+
+```bash
+conda env create -f environment.yml   # open_spiel is in the pip section
+conda activate tiltstack
+```
+
+Or manually if the environment already exists:
+
+```bash
+pip install open_spiel
+```
+
+OpenSpiel wheels are pre-built for Python 3.11 on Linux x86_64. If you encounter a build-from-source fallback, verify your Python version and OS.
+
+### Configuring the Game
+
+The evaluation uses OpenSpiel's `universal_poker` game engine with parameters matched to the training setup:
+
+| Parameter | Value | Notes |
+|-----------|:-----:|-------|
+| Starting stacks | 2000 chips (= 20 BB) | Must match `STARTING_STACK = 40,000` milli-chips in `CFRTypes.h` |
+| Blinds | 50 / 100 | Small / Big |
+| Betting | No-limit | `betting=no_limit` |
+| Players | 2 | Heads-up |
+
+Recommended game string:
+```python
+game = pyspiel.load_game(
+    "universal_poker(betting=no_limit,numPlayers=2,numSuits=4,numRanks=13,"
+    "numHoleCards=2,numRounds=4,blind=50 100,raiseSize=0 0,maxRaises=0 0,"
+    "numBoardCards=0 3 1 1,stack=2000 2000)"
+)
+```
+
+### Running the Match Evaluation
+
+```bash
+cd src
+python pysrc/evaluation/match_runner.py \
+    --strat-net  ../checkpoints/policy0050.pt \
+    --br-net0    ../br_checkpoints/br_adv0_0040.pt \
+    --br-net1    ../br_checkpoints/br_adv1_0040.pt \
+    --clusters   ../clusters \
+    --num-games  10000
+```
+
+The script reports P0 win rate in chips/hand. Run duplicate matches (swap seats) to cancel out deal variance.
+
+---
+
 ## Demos
 
 ### Kuhn Poker (no build step)
