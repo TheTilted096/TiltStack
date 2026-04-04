@@ -2,15 +2,7 @@
 
 hand_indexer_t g_indexer;
 
-CFRGame::CFRGame() {
-    static bool indexer_ready = false;
-    if (!indexer_ready) {
-        uint8_t rounds[] = {2, 3, 1, 1};
-        hand_indexer_init(4, rounds, &g_indexer);
-        indexer_ready = true;
-    }
-    begin(STARTING_STACK, STARTING_STACK, 0);
-}
+CFRGame::CFRGame() { begin(STARTING_STACK, STARTING_STACK, 0); }
 
 void CFRGame::initState(int ss1, int ss2, bool h) {
     ply = 0;
@@ -367,4 +359,23 @@ InfoSet CFRGame::getInfo() {
     }
 
     return info;
+}
+
+void loadTables(const std::string &clusters_dir) {
+    const std::string d = clusters_dir + "/";
+
+    readU16File(d + "preflop_ehs_fine.bin", gEHS[0]);
+    readU16File(d + "flop_ehs_fine.bin",    gEHS[1]);
+    readU16File(d + "turn_ehs_fine.bin",    gEHS[2]);
+    readU16File(d + "river_ehs_fine.bin",   gEHS[3]);
+
+    gLabels[0].resize(gEHS[0].size());
+    std::iota(gLabels[0].begin(), gLabels[0].end(), uint16_t{0});
+
+    readU16File(d + "flop_labels.bin",  gLabels[1]);
+    readU16File(d + "turn_labels.bin",  gLabels[2]);
+    readU16File(d + "river_labels.bin", gLabels[3]);
+
+    uint8_t rounds[] = {2, 3, 1, 1};
+    hand_indexer_init(4, rounds, &g_indexer);
 }

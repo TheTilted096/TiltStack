@@ -19,6 +19,7 @@ Player convention (same as NLHE_Trainer)
 """
 
 import os
+import math
 import time
 import argparse
 from pathlib import Path
@@ -32,7 +33,7 @@ from network_training import (
     decode_batch, verify_layout, infoset_dtype, NUM_ACTIONS,
 )
 
-RESERVOIR_CAPACITY = 20_000_000
+RESERVOIR_CAPACITY = 100_000_000
 
 
 # ---------------------------------------------------------------------------
@@ -137,9 +138,10 @@ def collect_advantage(orch, hero: bool, adv_res: list) -> None:
 
 def save_final_advantages(ckpt_dir, t, adv_nets):
     """Save only the final two advantage networks."""
+    date = time.strftime('%m%d%y')
     paths = []
     for i in range(2):
-        path = ckpt_dir / f"br_adv{i}_{t:04d}.pt"
+        path = ckpt_dir / f"adv{i}_{t:04d}-{date}.pt"
         torch.save({
             "t": t,
             "net": adv_nets[i].state_dict(),
@@ -171,11 +173,13 @@ def main():
         description="TiltStack best-response training against a fixed policy")
     parser.add_argument("--target", type=str, required=True,
         help="Path to a TiltStack checkpoint containing the trained strat_net")
-    parser.add_argument("--iters",      type=int,   default=60)
+    parser.add_argument("--iters",      type=int,   default=100)
     parser.add_argument("--threads",    type=int,   default=16)
-    parser.add_argument("--samples",    type=int,   default=5_000_000,
-        help="Target advantage samples per player per iteration  (default: 5M)")
-    parser.add_argument("--batch",      type=int,   default=8192)
+    parser.add_argument("--samples",    type=int,   default=10_000_000,
+        help="Target advantage samples per player per iteration  (default: 10M)")
+    parser.add_argument("--batch",      type=int,   default=16384)
+    parser.add_argument("--adv-step",   type=int,   default=2500,
+        help="Mini-batches of advantage training per iteration  (default: 2500)")
     parser.add_argument("--lr",         type=float, default=3e-4)
     parser.add_argument("--seed",       type=int,   default=None)
     args = parser.parse_args()
@@ -243,22 +247,25 @@ def main():
             # -- Advantage training -------------------------------------------
             n_adv = adv_res[player].size
             if n_adv > 0:
-                adv_opts[player].state.clear()
+                adv_nets[player] = DeepCFRNet().to(device)
+                adv_opts[player] = torch.optim.Adam(adv_nets[player].parameters(), lr=args.lr)
+                batches_per_epoch = max(1, math.ceil(n_adv / args.batch))
+                epochs = max(1, math.ceil(args.adv_step / batches_per_epoch))
                 t0 = time.perf_counter()
                 losses = train_advantage(
                     adv_nets[player], adv_opts[player],
                     adv_res[player].inputs [:n_adv],
                     adv_res[player].targets[:n_adv],
                     batch_size=args.batch,
-                    epochs=1,
+                    epochs=epochs,
                     device=device,
                 )
                 train_secs = time.perf_counter() - t0
-                loss_str   = "  ".join(f"{l:.5f}" for l in losses)
                 print(f"\n  [P{player} advantage]  samples={_fmt(n_adv)}"
-                      f"  ·  loss={loss_str}"
+                      f"  ·  steps={args.adv_step}  epochs={epochs}"
+                      f"  ·  loss={losses[-1]:.5f}"
                       f"  ·  {train_secs:.1f}s"
-                      f"  ·  {_rate(n_adv, train_secs)} samples/s")
+                      f"  ·  {_rate(n_adv * epochs, train_secs)} samples/s")
 
         # -- Iteration summary ------------------------------------------------
         iter_elapsed = time.perf_counter() - iter_start

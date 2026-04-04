@@ -76,19 +76,8 @@ inline void readU16File(const std::string &path, std::vector<uint16_t> &out) {
         throw std::runtime_error("Read failed: " + path);
 }
 
-inline void loadTables(const std::string &clusters_dir) {
-    const std::string d = clusters_dir + "/";
-
-    readU16File(d + "preflop_ehs_fine.bin", gEHS[0]);
-    readU16File(d + "flop_ehs_fine.bin", gEHS[1]);
-    readU16File(d + "turn_ehs_fine.bin", gEHS[2]);
-    readU16File(d + "river_ehs_fine.bin", gEHS[3]);
-
-    // Preflop: no cluster labels — use identity (bucket == canonical index).
-    gLabels[0].resize(gEHS[0].size());
-    std::iota(gLabels[0].begin(), gLabels[0].end(), uint16_t{0});
-
-    readU16File(d + "flop_labels.bin", gLabels[1]);
-    readU16File(d + "turn_labels.bin", gLabels[2]);
-    readU16File(d + "river_labels.bin", gLabels[3]);
-}
+// Defined in CFRGame.cpp — needs hand_indexer_init which is only available
+// after OMPEval/hand-isomorphism includes are resolved in that TU.
+// Also initialises g_indexer, so all callers get a ready-to-use indexer
+// without needing a separate init step.
+void loadTables(const std::string &clusters_dir);

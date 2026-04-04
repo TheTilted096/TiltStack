@@ -80,7 +80,8 @@ def _split_history(osp_game, state):
     OpenSpiel universal_poker action encoding:
       0        — fold
       1        — call / check
-      K … M   — raise; the action integer IS the chip amount being bet/raised
+      K … M   — raise; the action integer is the TOTAL chips invested by the
+                 acting player this hand (cumulative, not the amount added)
 
     Returns
     -------
@@ -162,14 +163,16 @@ def _abstract_to_osp(abstract_action, legal_osp, game):
     if abstract_action == _CALL:
         return call_action
 
-    # Raise: compute the CFRGame milli-chip target, convert to chips, then
-    # find the closest legal OpenSpiel action (action integer == chip amount).
+    # Raise: convert the CFRGame milli-chip bet amount to total chips invested,
+    # then find the closest legal OpenSpiel action (which is total chips invested).
     raise_osp = sorted(a for a in legal_osp if a > 1)
     if not raise_osp:
         return call_action
 
-    target_chips = _cfr_bet_amounts(game)[abstract_action] / OSP_MC_SCALE
-    return min(raise_osp, key=lambda a: abs(a - target_chips))
+    amount_added_mc  = _cfr_bet_amounts(game)[abstract_action]
+    invested_mc      = STARTING_STACK - game.stacks[game.stm]
+    target_total_chips = (invested_mc + amount_added_mc) / OSP_MC_SCALE
+    return min(raise_osp, key=lambda a: abs(a - target_total_chips))
 
 
 # ---------------------------------------------------------------------------
@@ -212,8 +215,11 @@ class _CFRBotMixin:
             elif osp_action == 1:                        # call / check
                 legal = self.game.generate_actions()
                 self.game.make_move(_CALL if _CALL in legal else _CHECK)
-            else:                                        # raise — action IS chip amount
-                self.game.make_bet(osp_action * OSP_MC_SCALE)
+            else:                                        # raise — action is total chips invested
+                stm = self.game.stm
+                invested_mc    = STARTING_STACK - self.game.stacks[stm]
+                amount_added_mc = osp_action * OSP_MC_SCALE - invested_mc
+                self.game.make_bet(amount_added_mc)
 
         return True
 

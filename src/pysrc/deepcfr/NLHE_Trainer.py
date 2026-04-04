@@ -28,6 +28,7 @@ Player convention
 """
 
 import os
+import math
 import time
 import argparse
 from pathlib import Path
@@ -40,7 +41,7 @@ from network_training import (
     decode_batch, verify_layout, infoset_dtype, NUM_ACTIONS,
 )
 
-RESERVOIR_CAPACITY = 20_000_000
+RESERVOIR_CAPACITY = 100_000_000
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +139,8 @@ def collect_into_reservoirs(orch, hero: bool,
 
 def save_final_policy(ckpt_dir, t, strat_net):
     """Save only the final policy network."""
-    policy_path = os.path.join(ckpt_dir, f"policy{t:04d}.pt")
+    date = time.strftime('%m%d%y')
+    policy_path = os.path.join(ckpt_dir, f"policy{t:04d}-{date}.pt")
     torch.save({
         "t": t,
         "net": strat_net.state_dict(),
@@ -153,14 +155,16 @@ def save_final_policy(ckpt_dir, t, strat_net):
 
 def main():
     parser = argparse.ArgumentParser(description="TiltStack DeepCFR training loop")
-    parser.add_argument("--iters",      type=int,   default=100,
-        help="CFR iterations T  (default: 100)")
+    parser.add_argument("--iters",      type=int,   default=150,
+        help="CFR iterations T  (default: 150)")
     parser.add_argument("--threads",    type=int,   default=16)
-    parser.add_argument("--samples",    type=int,   default=4_000_000,
-        help="Target advantage samples per player per iteration  (default: 4M)")
-    parser.add_argument("--batch",      type=int,   default=8192)
-    parser.add_argument("--epochs",     type=int,   default=25,
-        help="Strategy network training epochs  (default: 25)")
+    parser.add_argument("--samples",    type=int,   default=10_000_000,
+        help="Target advantage samples per player per iteration  (default: 10M)")
+    parser.add_argument("--batch",      type=int,   default=16384)
+    parser.add_argument("--epochs",     type=int,   default=4,
+        help="Strategy network training epochs  (default: 4)")
+    parser.add_argument("--adv-step",   type=int,   default=2500,
+        help="Mini-batches of advantage training per iteration  (default: 2500)")
     parser.add_argument("--lr",         type=float, default=3e-4)
     parser.add_argument("--seed",       type=int,   default=None)
     args = parser.parse_args()
@@ -234,22 +238,25 @@ def main():
             # -- Advantage training -------------------------------------------
             n_adv = adv_res[player].size
             if n_adv > 0:
-                adv_opts[player].state.clear()
+                adv_nets[player] = DeepCFRNet().to(device)
+                adv_opts[player] = torch.optim.Adam(adv_nets[player].parameters(), lr=args.lr)
+                batches_per_epoch = max(1, math.ceil(n_adv / args.batch))
+                epochs = max(1, math.ceil(args.adv_step / batches_per_epoch))
                 t0 = time.perf_counter()
                 losses = train_advantage(
                     adv_nets[player], adv_opts[player],
                     adv_res[player].inputs [:n_adv],
                     adv_res[player].targets[:n_adv],
                     batch_size=args.batch,
-                    epochs=1,
+                    epochs=epochs,
                     device=device,
                 )
                 train_secs = time.perf_counter() - t0
-                loss_str   = "  ".join(f"{l:.5f}" for l in losses)
                 print(f"\n  [P{player} advantage]  samples={_fmt(n_adv)}"
-                      f"  ·  loss={loss_str}"
+                      f"  ·  steps={args.adv_step}  epochs={epochs}"
+                      f"  ·  loss={losses[-1]:.5f}"
                       f"  ·  {train_secs:.1f}s"
-                      f"  ·  {_rate(n_adv, train_secs)} samples/s")
+                      f"  ·  {_rate(n_adv * epochs, train_secs)} samples/s")
 
         # -- Iteration summary ------------------------------------------------
         iter_elapsed = time.perf_counter() - iter_start

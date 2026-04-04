@@ -147,7 +147,7 @@ def decode_batch(raw: np.ndarray):
 
 class ResidualBlock(nn.Module):
     """A standard 2-layer residual block for MLPs."""
-    def __init__(self, dim: int = 256):
+    def __init__(self, dim: int = 512):
         super().__init__()
         self.fc1 = nn.Linear(dim, dim)
         self.fc2 = nn.Linear(dim, dim)
@@ -165,11 +165,12 @@ class DeepCFRNet(nn.Module):
     """
     Shared architecture for both the advantage and strategy networks.
 
-        Input (338) → Linear(256) → ReLU
-                   → ResNet(256) → ReLU  (skip connection: ReLU(linear + input))
-                   → ResNet(256) → ReLU  (skip connection: ReLU(linear + input))
-                   → ResNet(256) → ReLU  (skip connection: ReLU(linear + input))
-                   → Linear(256 → 5)
+        Input (338) → Linear(512) → ReLU
+                   → ResNet(512) → ReLU  (skip connection: ReLU(linear + input))
+                   → ResNet(512) → ReLU  (skip connection: ReLU(linear + input))
+                   → ResNet(512) → ReLU  (skip connection: ReLU(linear + input))
+                   → ResNet(512) → ReLU  (skip connection: ReLU(linear + input))
+                   → Linear(512 → 5)
 
     Street buckets are passed as integer indices (N, 3) — columns are flop,
     turn, river — and embedded into EMBED_DIM-dimensional vectors before
@@ -184,11 +185,12 @@ class DeepCFRNet(nn.Module):
         self.flop_embed  = nn.Embedding(FLOP_BUCKETS,  embed_dim, padding_idx=0)
         self.turn_embed  = nn.Embedding(TURN_BUCKETS,  embed_dim, padding_idx=0)
         self.river_embed = nn.Embedding(RIVER_BUCKETS, embed_dim, padding_idx=0)
-        self.linear1 = nn.Linear(INPUT_DIM, 256)
-        self.res_block1 = ResidualBlock(256)
-        self.res_block2 = ResidualBlock(256)
-        self.res_block3 = ResidualBlock(256)
-        self.output = nn.Linear(256, NUM_ACTIONS)
+        self.linear1 = nn.Linear(INPUT_DIM, 512)
+        self.res_block1 = ResidualBlock(512)
+        self.res_block2 = ResidualBlock(512)
+        self.res_block3 = ResidualBlock(512)
+        self.res_block4 = ResidualBlock(512)
+        self.output = nn.Linear(512, NUM_ACTIONS)
 
     def forward(self, x_cont: torch.Tensor, buckets: torch.Tensor) -> torch.Tensor:
         """
@@ -205,10 +207,11 @@ class DeepCFRNet(nn.Module):
         # First linear layer
         x = F.relu(self.linear1(x))  # (N, 256)
 
-        # Three 2-layer residual blocks
+        # Four 2-layer residual blocks
         x = self.res_block1(x)
         x = self.res_block2(x)
         x = self.res_block3(x)
+        x = self.res_block4(x)
 
         # Output layer
         return self.output(x)
@@ -356,7 +359,8 @@ def train_advantage(
     dataset = _InfoSetDataset(raw_inputs, targets)
     loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True,
                          collate_fn=_collate_adv, pin_memory=True,
-                         num_workers=8, persistent_workers=True)
+                         num_workers=8, persistent_workers=True,
+                         prefetch_factor=4)
     net.train()
     losses = []
 

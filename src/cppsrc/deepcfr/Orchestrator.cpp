@@ -5,13 +5,8 @@
 
 Orchestrator::Orchestrator(int numThreads, uint64_t seed)
     : numThreads_(numThreads), seed_(seed) {
-    // hand_index.c initialises its global lookup tables behind a plain
-    // `static bool tables_ready` guard (no mutex, not atomic). Initialising
-    // g_indexer here — on the main thread, before any workers are spawned —
-    // runs hand_index_ctor() once while single-threaded, so every subsequent
-    // worker call sees tables_ready == true and skips it.
-    uint8_t rounds[] = {2, 3, 1, 1};
-    hand_indexer_init(4, rounds, &g_indexer);
+    // g_indexer is initialised by loadTables(), which callers must invoke
+    // before constructing an Orchestrator.
 
     schedulerPtrs.resize(numThreads, nullptr);
     threadPool_.reserve(numThreads);

@@ -53,14 +53,14 @@ GAME_STRING = (
     "numRanks=13,"
     "numHoleCards=2,"
     "numRounds=4,"
-    "blind=50 100,"         # small blind / big blind (chips)
-    "raiseSize=0 0,"        # 0 = unlimited raise sizes in no-limit
-    "maxRaises=0 0,"        # 0 = unlimited raises per round
-    "numBoardCards=0 3 1 1," # preflop/flop/turn/river board cards
-    "stack=2000 2000"       # 20 BB each (chips; 1 chip = 100 milli-chips)
+    "blind=50 100,"
+    "maxRaises=99 99 99 99,"
+    "numBoardCards=0 3 1 1,"
+    "stack=2000 2000,"
+    "firstPlayer=1 2 2 2,"  # <-- Explicitly sets HUNL action order
+    "bettingAbstraction=fullgame"
     ")"
 )
-
 
 # ---------------------------------------------------------------------------
 # Match loop
@@ -75,15 +75,6 @@ def deal_cards() -> list:
     """
     return np.random.permutation(52)[:9].tolist()
 
-
-def swap_seats(cards: list) -> list:
-    """
-    Return a new deal with the two hole-card pairs swapped.
-
-    Used for the second pass of a duplicate match: the board stays the same
-    but each player now holds the cards their opponent held in the first pass.
-    """
-    return [cards[2], cards[3], cards[0], cards[1]] + cards[4:]
 
 
 def play_match(game, bot0, bot1, cards: list) -> float:
@@ -169,7 +160,7 @@ def main():
     for i in range(args.num_games):
         cards     = deal_cards()
         payoff_a  = play_match(game, tiltstack, nbr, cards)
-        payoff_b  = play_match(game, nbr, tiltstack, swap_seats(cards))
+        payoff_b  = play_match(game, nbr, tiltstack, cards)
         sb_payoff += payoff_a
         bb_payoff -= payoff_b   # flip: payoff_b is NBR's P0 utility
         deal_payoffs.append(payoff_a - payoff_b)

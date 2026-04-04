@@ -4,6 +4,7 @@ __pycache__/
 build/
 checkpoints/
 br_checkpoints/
+saves/
 *.pyd
 *.so
 
@@ -13,3 +14,5 @@ br_checkpoints/
 # Solver output
 *.npy
 *.bin
+
+src/*.txt
