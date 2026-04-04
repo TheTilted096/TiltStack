@@ -102,12 +102,14 @@ def build_opponent_vector(profile: str):
                 s[Action.BET.value] = 1.0
             else:
                 s[Action.CHECK.value] = 1.0
-        else:  # Aggressive
+        else:  # Aggressive — matches aggressive_action():
+            # P(RAISE)=0.70, P(BET)=0.30*0.60=0.18, P(CHECK)=0.30*0.40=0.12
             if Action.RAISE in moves:
-                s[Action.RAISE.value] = 0.7
-                s[Action.CHECK.value] = 0.3
-            elif Action.BET in moves:
-                s[Action.BET.value] = 0.6
+                s[Action.RAISE.value] = 0.70
+                s[Action.BET.value]   = 0.18
+                s[Action.CHECK.value] = 0.12
+            elif Action.BET in moves:   # max raises (r=3): {CHECK, BET}
+                s[Action.BET.value]   = 0.6
                 s[Action.CHECK.value] = 0.4
             else:
                 s[Action.CHECK.value] = 1.0
@@ -285,7 +287,8 @@ st.markdown("### Step 3 — Live Simulation")
 if not st.session_state.trained:
     st.info("Complete Step 1 first.")
 else:
-    sim_btn = st.button("▶  Run Live Demo", disabled=st.session_state.sim_done)
+    not_ready = st.session_state.sim_done or not st.session_state.trained or st.session_state.br_strategy is None
+    sim_btn = st.button("▶  Run Live Demo", disabled=not_ready)
 
     chart_placeholder = st.empty()
     stats_placeholder = st.columns(4)
