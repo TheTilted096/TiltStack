@@ -1,12 +1,22 @@
 # TiltStack
 
-An exploitative poker AI using GTO strategy followed by opponent modelling.
+Neural-network-accelerated Counterfactual Regret Minimization (DeepCFR) for no-limit Texas Hold'em.
 
 ## Overview
 
-TiltStack is a poker AI project that combines Game Theory Optimal (GTO) strategy computation with opponent modeling to create an exploitative agent. The project uses Counterfactual Regret Minimization (CFR) to compute Nash equilibrium strategies, then adapts play based on observed opponent tendencies.
+TiltStack is a poker AI system that uses deep learning to accelerate convergence to Nash equilibrium in heads-up no-limit poker. The core innovation is **DeepCFR**: neural networks (advantage networks and strategy networks) predict regrets and strategies during game-tree traversal, enabling efficient GPU-accelerated training via C++20 coroutines.
 
-The `src/` directory contains the Texas Hold'em abstraction pipeline — a three-stage K-means clustering system that compresses the game tree into a tractable state space. The `demos/` directory contains self-contained solver implementations used for development and reference.
+**Current performance (500k hands):**
+- vs baseline opponent: **-207.60 ± 10.20 mBB/hand overall**
+- SB position: -162.76 mBB/hand
+- BB position: -252.43 mBB/hand
+
+The system comprises:
+
+1. **Texas Hold'em abstraction pipeline** (`src/`): Four-stage K-means clustering that compresses 2.4B river states → 8,192 clusters, enabling network-based game solving
+2. **DeepCFR solver** (C++ core + Python interface): Coroutine-based parallel rollouts with GPU batching
+3. **Neural networks**: Shared architecture for advantage prediction (regrets) and strategy learning
+4. **Match evaluation** (`src/pysrc/evaluation/`): OpenSpiel integration for duplicate-pair match evaluation
 
 ## Repository Structure
 
@@ -39,12 +49,15 @@ TiltStack/
 │       └── src/
 │           ├── cppsrc/         #   C++ CFR+ solver (PyBind11)
 │           └── pysrc/          #   Python training & output layer
-├── docs/                       # All documentation
+├── docs/                       # Technical documentation
 │   ├── SETUP.md                #   Environment setup and pipeline instructions
+│   ├── DEEPCFR_TRAVERSAL.md    #   DeepCFR algorithm and game traversal
+│   ├── NETWORK_ARCHITECTURE.md #   Neural network design and training
+│   ├── COROUTINE_ROLLOUTS.md   #   C++20 coroutines and GPU batching
+│   ├── EVALUATION_METHODOLOGY.md #  Match evaluation and convergence metrics
 │   ├── CLUSTERING.md           #   Hold'em abstraction pipeline technical reference
-│   └── leduc/
-│       ├── README.md           #   Leduc CFR+ solver overview
-│       └── IMPLEMENTATION.md   #   Algorithm details and convergence analysis
+│   ├── LEDUC.md                #   Leduc Hold'em CFR+ solver overview
+│   └── LEDUC_IMPLEMENTATION.md #   Leduc algorithm details and convergence
 ├── environment.yml             # Conda environment (Python 3.11, faiss-gpu, numpy, matplotlib)
 ├── requirements.txt            # pip dependencies (numpy, faiss-cpu, pybind11, matplotlib)
 ├── README.md
@@ -93,62 +106,125 @@ python pysrc/flop_visualize_labels.py
 
 GPU (FAISS) is required for all clustering pipelines. See [docs/CLUSTERING.md](docs/CLUSTERING.md) for parameters, output files, and technical details.
 
+## Documentation
+
+Key technical documents:
+
+| Document | Purpose |
+|----------|---------|
+| [DEEPCFR_TRAVERSAL.md](docs/DEEPCFR_TRAVERSAL.md) | Core DeepCFR algorithm, game representation, regret computation |
+| [NETWORK_ARCHITECTURE.md](docs/NETWORK_ARCHITECTURE.md) | Neural network design (embeddings, layers, loss functions) |
+| [COROUTINE_ROLLOUTS.md](docs/COROUTINE_ROLLOUTS.md) | C++20 coroutines, frame pooling, GPU batching machinery |
+| [EVALUATION_METHODOLOGY.md](docs/EVALUATION_METHODOLOGY.md) | Match evaluation, duplicate pairs, exploitability |
+| [CLUSTERING.md](docs/CLUSTERING.md) | Hold'em abstraction pipeline (four-stage K-means) |
+| [SETUP.md](docs/SETUP.md) | Build instructions, environment setup, troubleshooting |
+
 ## Components
 
-### Hold'em Abstraction Pipeline (`src/`)
+### DeepCFR Solver (`src/cppsrc/deepcfr/`, `src/pysrc/deepcfr/`)
 
-Three-stage K-means clustering pipeline that abstracts Texas Hold'em into buckets for a GTO solver:
+Neural-network-accelerated CFR with:
+- **C++ core**: Game traversal, coroutines, C++ types (CFRGame, Scheduler, Orchestrator)
+- **Python interface**: Network training, checkpoint management, match evaluation
+- **GPU acceleration**: Batched neural inference via FAISS and PyTorch
+- **Parallel rollouts**: Multi-threaded games with lock-free scheduling
 
-| Stage | States | Features | Distance | Clusters |
-|-------|-------:|----------|----------|-------:|
-| River | 2.4B | 169-dim equity vectors | L2 | 8,192 |
-| Turn | ~55M | 256-dim CDF vectors (wide river buckets) | L1 / EMD | 8,192 |
-| Flop | 1.29M | 256-dim CDF vectors (wide turn buckets) | L1 / EMD | 2,048 |
+See [docs/DEEPCFR_TRAVERSAL.md](docs/DEEPCFR_TRAVERSAL.md) for algorithm details.
 
-Each stage reads the labels and centroids from the previous stage. All pipelines use FAISS GPU K-means and write `uint16` label files plus `float32` centroid arrays.
+### Hold'em Abstraction Pipeline (`src/cppsrc/clustering/`, `src/pysrc/clustering/`)
 
-See [docs/CLUSTERING.md](docs/CLUSTERING.md) for the full technical documentation.
+Four-stage K-means clustering pipeline:
 
-### Leduc Hold'em Solver (`demos/leduc/`)
+| Stage | States | Features | Distance | Clusters | Purpose |
+|-------|-------:|----------|----------|-------:|---------|
+| River | 2.4B | 169-dim equity | L2 | 8,192 | Network input features |
+| Turn | ~55M | 256-dim histogram CDF | L1 / EMD | 8,192 | Summarize river distribution |
+| Flop | 1.3M | 256-dim histogram CDF | L1 / EMD | 2,048 | Summarize turn distribution |
+| Preflop | 169 | — | — | 169 | Canonical hand classes |
 
-Self-contained CFR+ solver for Leduc Hold'em with a C++ core exposed to Python via PyBind11. Converges to 0.00 mBB exploitability in 14k iterations at ~3,810 iterations/second.
+Each stage reads labels/centroids from the previous stage. FAISS GPU K-means. Output: `uint16` label files + `float32` centroid arrays.
 
-See the [Leduc README](docs/leduc/README.md) and [Implementation Notes](docs/leduc/IMPLEMENTATION.md).
+See [docs/CLUSTERING.md](docs/CLUSTERING.md).
 
-### Kuhn Poker (`demos/kuhn/`)
+### Match Evaluation (`src/pysrc/evaluation/`)
 
-Reference implementation of vanilla CFR for 3-card Kuhn Poker with interactive convergence visualization on 2D strategy simplices.
+OpenSpiel-based match runner for duplicate-pair evaluation:
+- **TiltStack agent**: Neural network inference during OpenSpiel game simulation
+- **Baseline agents**: Best-response, random
+- **Duplicate protocol**: Swapped seats cancel deal variance
+- **Metrics**: Per-seat edges (SB/BB), overall edge, confidence intervals
+
+See [docs/EVALUATION_METHODOLOGY.md](docs/EVALUATION_METHODOLOGY.md).
+
+### Reference Solvers (`demos/`)
+
+**Leduc Hold'em CFR+ Solver** (`demos/leduc/`): Self-contained C++/Python solver for a smaller game. Converges to 0.00 mBB in 14k iterations (~3.8k iter/sec).
+
+**Kuhn Poker** (`demos/kuhn/`): Vanilla CFR on 3-card Kuhn Poker. No build step; interactive convergence plots.
 
 ## Dependencies
 
-### Root (`requirements.txt`)
+### Python & PyPI (`requirements.txt`)
 
 ```
-numpy
-faiss-gpu
-pybind11
-matplotlib
+numpy              # Array operations
+faiss-gpu          # GPU K-means clustering (required; CPU impractical)
+pybind11           # C++/Python bindings
+matplotlib         # Visualization
+open_spiel         # Game simulation (evaluation only)
 ```
 
-Install with `pip install -r requirements.txt`. A GPU is required — the clustering pipelines are not practical to run on CPU.
+Install: `pip install -r requirements.txt` (GPU required).
+
+### Conda (`environment.yml` — Recommended)
+
+```yaml
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - matplotlib
+  - pybind11
+  - faiss-gpu       # GPU K-means (CUDA 12.x)
+  - gtest           # C++ testing
+  - pytorch=2.5.1=py3.11_cuda12.4_cudnn9.1.0_0  # GPU training
+  - pytorch-cuda=12.4
+  - pip
+  - pip:
+      - setuptools>=42.0.0
+      - open_spiel
+```
+
+Install: `conda env create -f environment.yml && conda activate tiltstack`
 
 ### System Requirements
 
-- **Python**: 3.8+
-- **C++ compiler**: C++20 (Leduc solver), C++17 (Hold'em expanders)
-  - Windows: MSVC via Visual Studio Build Tools
-  - Linux/Mac: g++ or clang++
-- **OpenMP**: Required for multi-threaded equity computation
-- **GPU**: Required for clustering pipelines (FAISS GPU)
+- **Python**: 3.8+ (3.11 recommended for conda)
+- **C++ compiler**: 
+  - C++20 (DeepCFR solver, Leduc demo)
+  - C++17 (Hold'em clustering pipeline)
+  - Linux/Mac: g++ 10+ or clang++ 12+
+  - Windows: MSVC 2019+
+- **CUDA**: 11.x or 12.x (GPU clustering and training)
+- **OpenMP**: Multi-threaded equity computation (libomp-dev on Ubuntu, libgomp-devel on RHEL)
+- **GPU VRAM**: ≥4 GB (2 GB for clustering, 2 GB for inference during training)
 
 ## Current Status
 
-- Hold'em river equity clustering — 2.4B states into 8,192 buckets
-- Hold'em turn histogram clustering — ~55M states into 8,192 buckets
-- Hold'em flop histogram clustering — 1.29M states into 2,048 buckets
-- Leduc Hold'em CFR+ solver — converges to 0.00 mBB exploitability in 14k iterations
-- Best Response computation for exploitability measurement
-- Kuhn Poker vanilla CFR demo
+### Completed
+- ✓ Hold'em abstraction pipeline: river (2.4B → 8k), turn (55M → 8k), flop (1.3M → 2k) clustering
+- ✓ DeepCFR solver: Neural networks + coroutine rollouts + GPU batching
+- ✓ Leduc Hold'em CFR+ reference solver (0.00 mBB in 14k iterations)
+- ✓ Match evaluation framework (OpenSpiel + duplicate pairs)
+- ✓ Kuhn Poker vanilla CFR demo
+
+### In Progress
+- DeepCFR training convergence (current: -207.60 mBB/hand @ 500k hands)
+- Advantage network refinement
+- Strategy network regularization
 
 ## Authors
 
