@@ -243,8 +243,12 @@ def main():
             rollout_secs = time.perf_counter() - t0
 
             rollouts = sum(s.rollout_count() for s in orch.schedulers)
+            t0_collect = time.perf_counter()
             collect_advantage(orch, hero, adv_res)
+            collect_secs = time.perf_counter() - t0_collect
+            t0_clear = time.perf_counter()
             orch.clear_buffers()
+            clear_secs = time.perf_counter() - t0_clear
 
             adv_new  = adv_res[player].n_seen - adv_before
             adv_size = adv_res[player].size
@@ -255,6 +259,7 @@ def main():
                   f"  ·  {_rate(adv_new, rollout_secs)} infosets/s")
             print(f"    advantage  +{_fmt(adv_new):<12}"
                   f"  reservoir  {_fmt(adv_size):>12} / {cap_str}")
+            print(f"    collect={collect_secs:.1f}s  clear={clear_secs:.1f}s")
 
             # -- Advantage training -------------------------------------------
             n_adv = adv_res[player].size

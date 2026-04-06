@@ -29,7 +29,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
 
 # ---------------------------------------------------------------------------
 # Constants — must match CFRTypes.h
@@ -300,27 +299,6 @@ class Reservoir:
         self.n_seen += B
 
 
-# ---------------------------------------------------------------------------
-# Dataset
-#
-# Workers only stack raw uint8 rows and hand them to the GPU; decode_batch_gpu
-# handles all field extraction on-device after the H2D transfer.
-# ---------------------------------------------------------------------------
-
-class _InfoSetDataset(Dataset):
-    def __init__(self, raw, targets, weights=None):
-        self.raw     = raw      # (N, INFOSET_BYTES) uint8
-        self.targets = targets  # (N, NUM_ACTIONS)   float32
-        self.weights = weights  # (N,)               int32 | None
-
-    def __len__(self):
-        return len(self.raw)
-
-    def __getitem__(self, idx):
-        if self.weights is not None:
-            return self.raw[idx], self.targets[idx], self.weights[idx]
-        return self.raw[idx], self.targets[idx]
-
 def decode_batch_gpu(raw_gpu: torch.Tensor):
     """Decodes a raw (N, 160) uint8 tensor natively on the GPU."""
     N = raw_gpu.shape[0]
@@ -344,17 +322,6 @@ def decode_batch_gpu(raw_gpu: torch.Tensor):
     
     return x_cont, buckets
 
-def _collate_adv(batch):
-    raw     = np.stack([b[0] for b in batch])
-    targets = np.stack([b[1] for b in batch])
-    return torch.from_numpy(raw), torch.from_numpy(targets)
-
-def _collate_pol(batch):
-    raw     = np.stack([b[0] for b in batch])
-    targets = np.stack([b[1] for b in batch])
-    weights = np.stack([b[2] for b in batch]).astype(np.float32)
-    return torch.from_numpy(raw), torch.from_numpy(targets), torch.from_numpy(weights)
-
 
 # ---------------------------------------------------------------------------
 # Training
@@ -368,35 +335,50 @@ def train_advantage(
     batch_size: int = 4096,
     epochs: int = 1,
     device: torch.device = torch.device('cuda'),
-) -> float:
+) -> list[float]:
     """
     Train the advantage network with MSE loss on the regret targets.
     Returns the mean loss over the final epoch.
+
+    Samples are shuffled via torch.randperm each epoch and sliced directly
+    from zero-copy numpy views into pre-allocated pinned staging buffers,
+    avoiding DataLoader multiprocessing overhead. Loss is accumulated as a
+    GPU tensor and synced once per epoch rather than once per batch.
     """
-    dataset = _InfoSetDataset(raw_inputs, targets)
-    loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True,
-                         collate_fn=_collate_adv, pin_memory=True,
-                         num_workers=2, persistent_workers=True,
-                         prefetch_factor=4)
+    N      = len(raw_inputs)
+    raw_pt = torch.from_numpy(raw_inputs)
+    tgt_pt = torch.from_numpy(targets)
+
+    # Pinned staging buffers — allocated once, reused every batch.
+    raw_buf = torch.empty(batch_size, raw_inputs.shape[1], dtype=torch.uint8,   pin_memory=True)
+    tgt_buf = torch.empty(batch_size, targets.shape[1],    dtype=torch.float32, pin_memory=True)
+
     net.train()
     losses = []
 
     for _ in range(epochs):
-        total = 0.0
-        for raw, t in loader:
-            raw = raw.to(device, non_blocking=True)
-            t   = t  .to(device, non_blocking=True)
-            xc, b = decode_batch_gpu(raw)
+        perm      = torch.randperm(N)
+        total     = torch.zeros(1, device=device)
+        n_batches = 0
+        for start in range(0, N, batch_size):
+            idx = perm[start:start + batch_size]
+            bs  = len(idx)
+            raw_buf[:bs].copy_(raw_pt[idx])
+            tgt_buf[:bs].copy_(tgt_pt[idx])
+            raw_b = raw_buf[:bs].to(device, non_blocking=True)
+            t_b   = tgt_buf[:bs].to(device, non_blocking=True)
+            xc, b = decode_batch_gpu(raw_b)
             optimizer.zero_grad()
             # Illegal actions are stored as NaN; exclude them from the loss so
             # the network does not learn a spurious target of 0 for those slots.
-            mask = ~torch.isnan(t)                         # (N, A) bool
-            sq_err = ((net(xc, b) - t.nan_to_num(0.0)) * mask) ** 2
-            loss = sq_err.sum(dim=1).div(mask.sum(dim=1).clamp(min=1)).mean()
+            mask   = ~torch.isnan(t_b)
+            sq_err = ((net(xc, b) - t_b.nan_to_num(0.0)) * mask) ** 2
+            loss   = sq_err.sum(dim=1).div(mask.sum(dim=1).clamp(min=1)).mean()
             loss.backward()
             optimizer.step()
-            total += loss.item()
-        losses.append(total / len(loader))
+            total += loss.detach()
+            n_batches += 1
+        losses.append((total / n_batches).item())
 
     return losses
 
@@ -427,33 +409,47 @@ def train_policy(
     Returns per-epoch mean losses.
     """
     import time as _time
-    dataset = _InfoSetDataset(raw_inputs, targets, weights)
-    loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True,
-                         collate_fn=_collate_pol, pin_memory=True,
-                         num_workers=2, persistent_workers=True)
+    N      = len(raw_inputs)
+    raw_pt = torch.from_numpy(raw_inputs)
+    tgt_pt = torch.from_numpy(targets)
+    wt_pt  = torch.from_numpy(weights.astype(np.float32))
+
+    # Pinned staging buffers — allocated once, reused every batch.
+    raw_buf = torch.empty(batch_size, raw_inputs.shape[1], dtype=torch.uint8,   pin_memory=True)
+    tgt_buf = torch.empty(batch_size, targets.shape[1],    dtype=torch.float32, pin_memory=True)
+    wt_buf  = torch.empty(batch_size,                      dtype=torch.float32, pin_memory=True)
+
     net.train()
     losses = []
 
     for ep in range(1, epochs + 1):
-        ep_t0 = _time.perf_counter()
-        total = 0.0
-        for raw, t, wt in loader:
-            raw, t, wt = (raw.to(device, non_blocking=True),
-                          t  .to(device, non_blocking=True),
-                          wt .to(device, non_blocking=True))
-            xc, b = decode_batch_gpu(raw)
+        ep_t0     = _time.perf_counter()
+        perm      = torch.randperm(N)
+        total     = torch.zeros(1, device=device)
+        n_batches = 0
+        for start in range(0, N, batch_size):
+            idx = perm[start:start + batch_size]
+            bs  = len(idx)
+            raw_buf[:bs].copy_(raw_pt[idx])
+            tgt_buf[:bs].copy_(tgt_pt[idx])
+            wt_buf [:bs].copy_(wt_pt [idx])
+            raw_b = raw_buf[:bs].to(device, non_blocking=True)
+            t_b   = tgt_buf[:bs].to(device, non_blocking=True)
+            wt_b  = wt_buf [:bs].to(device, non_blocking=True)
+            xc, b = decode_batch_gpu(raw_b)
             optimizer.zero_grad()
             # Normalise weights within the mini-batch so they sum to 1,
             # preventing the loss magnitude from scaling with iteration number.
-            wt = wt / wt.mean()
+            wt_b       = wt_b / wt_b.mean()
             # Cross-entropy with soft targets: -sum_a target(a) * log_softmax(pred(a))
             log_probs  = F.log_softmax(net(xc, b), dim=1)
-            per_sample = -(t * log_probs).sum(dim=1)
-            loss = (wt * per_sample).mean()
+            per_sample = -(t_b * log_probs).sum(dim=1)
+            loss       = (wt_b * per_sample).mean()
             loss.backward()
             optimizer.step()
-            total += loss.item()
-        mean_loss = total / len(loader)
+            total += loss.detach()
+            n_batches += 1
+        mean_loss = (total / n_batches).item()
         losses.append(mean_loss)
         if epoch_callback is not None:
             epoch_callback(ep, mean_loss, _time.perf_counter() - ep_t0)
