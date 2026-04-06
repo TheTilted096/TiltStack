@@ -367,13 +367,14 @@ def train_advantage(
             tgt_buf[:bs].copy_(tgt_pt[idx])
             raw_b = raw_buf[:bs].to(device, non_blocking=True)
             t_b   = tgt_buf[:bs].to(device, non_blocking=True)
-            xc, b = decode_batch_gpu(raw_b)
             optimizer.zero_grad()
-            # Illegal actions are stored as NaN; exclude them from the loss so
-            # the network does not learn a spurious target of 0 for those slots.
-            mask   = ~torch.isnan(t_b)
-            sq_err = ((net(xc, b) - t_b.nan_to_num(0.0)) * mask) ** 2
-            loss   = sq_err.sum(dim=1).div(mask.sum(dim=1).clamp(min=1)).mean()
+            with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+                xc, b  = decode_batch_gpu(raw_b)
+                # Illegal actions are stored as NaN; exclude them from the loss so
+                # the network does not learn a spurious target of 0 for those slots.
+                mask   = ~torch.isnan(t_b)
+                sq_err = ((net(xc, b) - t_b.nan_to_num(0.0)) * mask) ** 2
+                loss   = sq_err.sum(dim=1).div(mask.sum(dim=1).clamp(min=1)).mean()
             loss.backward()
             optimizer.step()
             total += loss.detach()
@@ -436,15 +437,16 @@ def train_policy(
             raw_b = raw_buf[:bs].to(device, non_blocking=True)
             t_b   = tgt_buf[:bs].to(device, non_blocking=True)
             wt_b  = wt_buf [:bs].to(device, non_blocking=True)
-            xc, b = decode_batch_gpu(raw_b)
             optimizer.zero_grad()
-            # Normalise weights within the mini-batch so they sum to 1,
-            # preventing the loss magnitude from scaling with iteration number.
-            wt_b       = wt_b / wt_b.mean()
-            # Cross-entropy with soft targets: -sum_a target(a) * log_softmax(pred(a))
-            log_probs  = F.log_softmax(net(xc, b), dim=1)
-            per_sample = -(t_b * log_probs).sum(dim=1)
-            loss       = (wt_b * per_sample).mean()
+            with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+                xc, b  = decode_batch_gpu(raw_b)
+                # Normalise weights within the mini-batch so they sum to 1,
+                # preventing the loss magnitude from scaling with iteration number.
+                wt_b       = wt_b / wt_b.mean()
+                # Cross-entropy with soft targets: -sum_a target(a) * log_softmax(pred(a))
+                log_probs  = F.log_softmax(net(xc, b), dim=1)
+                per_sample = -(t_b * log_probs).sum(dim=1)
+                loss       = (wt_b * per_sample).mean()
             loss.backward()
             optimizer.step()
             total += loss.detach()

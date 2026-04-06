@@ -103,15 +103,15 @@ def run_inference_loop(orch, hero: bool, adv_nets, policy_net, device):
 
         out = np.empty((n, NUM_ACTIONS), dtype=np.float32)
 
-        with torch.no_grad():
+        with torch.no_grad(), torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             if len(hero_idx) > 0:
                 out[hero_idx] = adv_nets[int(hero)](
-                    x_cont[hero_idx], buckets[hero_idx]).cpu().numpy()
+                    x_cont[hero_idx], buckets[hero_idx]).float().cpu().numpy()
 
             if len(villain_idx) > 0:
                 logits = policy_net(
                     x_cont[villain_idx], buckets[villain_idx])
-                out[villain_idx] = F.softmax(logits, dim=1).cpu().numpy()
+                out[villain_idx] = F.softmax(logits, dim=1).float().cpu().numpy()
 
         sched.output_data()[:] = out
         sched.submit_batch()

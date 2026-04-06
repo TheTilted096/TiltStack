@@ -99,13 +99,13 @@ def run_inference_loop(orch, adv_nets, device):
 
         out = np.empty((n, NUM_ACTIONS), dtype=np.float32)
 
-        with torch.no_grad():
+        with torch.no_grad(), torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             if len(p0_idx) > 0:
                 out[p0_idx] = adv_nets[0](
-                    x_cont[p0_idx], buckets[p0_idx]).cpu().numpy()
+                    x_cont[p0_idx], buckets[p0_idx]).float().cpu().numpy()
             if len(p1_idx) > 0:
                 out[p1_idx] = adv_nets[1](
-                    x_cont[p1_idx], buckets[p1_idx]).cpu().numpy()
+                    x_cont[p1_idx], buckets[p1_idx]).float().cpu().numpy()
 
         sched.output_data()[:] = out
         sched.submit_batch()
