@@ -38,7 +38,8 @@ import torch
 import deepcfr
 from network_training import (
     DeepCFRNet, Reservoir, train_advantage, train_policy,
-    decode_batch, verify_layout, infoset_dtype, NUM_ACTIONS,
+    decode_batch_gpu, verify_layout, infoset_dtype, NUM_ACTIONS,
+    CONT_DIM, NUM_STREETS,
 )
 
 RESERVOIR_CAPACITY = 100_000_000
@@ -88,9 +89,7 @@ def run_inference_loop(orch, adv_nets, device):
         n   = sched.batch_size()
         raw = np.array(sched.input_data(), copy=False)
 
-        x_cont, buckets = decode_batch(raw)
-        x_cont  = x_cont .to(device, non_blocking=True)
-        buckets = buckets.to(device, non_blocking=True)
+        x_cont, buckets = decode_batch_gpu(torch.from_numpy(raw).to(device, non_blocking=True))
 
         struct       = raw.ravel().view(infoset_dtype)
         is_p0_acting = struct['is_button']
@@ -190,6 +189,17 @@ def main():
     adv_opts  = [torch.optim.Adam(n.parameters(), lr=args.lr) for n in adv_nets]
     strat_opt =  torch.optim.Adam(strat_net.parameters(),     lr=args.lr)
 
+    print(f"[{_ts()}]  torch.compile — tracing networks for kernel fusion ...", flush=True)
+    _t_compile = time.perf_counter()
+    adv_nets  = [torch.compile(net, fullgraph=True) for net in adv_nets]
+    strat_net =  torch.compile(strat_net, fullgraph=True)
+    _dummy_xc = torch.zeros(args.batch, CONT_DIM,    device=device)
+    _dummy_b  = torch.zeros(args.batch, NUM_STREETS, device=device, dtype=torch.long)
+    with torch.no_grad():
+        for _net in (*adv_nets, strat_net):
+            _net(_dummy_xc, _dummy_b)
+    print(f"[{_ts()}]  Compiled in {time.perf_counter() - _t_compile:.1f}s\n")
+
     seed = 0xdeadbeefcafe1234 if args.seed is None else args.seed
     orch = deepcfr.Orchestrator(args.threads, seed)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -240,7 +250,8 @@ def main():
             # -- Advantage training -------------------------------------------
             n_adv = adv_res[player].size
             if n_adv > 0:
-                adv_nets[player] = DeepCFRNet().to(device)
+                adv_nets[player]._orig_mod.apply(
+                    lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
                 adv_opts[player] = torch.optim.Adam(adv_nets[player].parameters(), lr=args.lr)
                 batches_per_epoch = max(1, math.ceil(n_adv / args.batch))
                 epochs = max(1, math.ceil(args.adv_step / batches_per_epoch))

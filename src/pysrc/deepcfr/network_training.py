@@ -301,12 +301,10 @@ class Reservoir:
 
 
 # ---------------------------------------------------------------------------
-# Lazy-decode Dataset
+# Dataset
 #
-# Decoding is deferred to DataLoader workers so each mini-batch is decoded in
-# parallel rather than the entire reservoir being decoded upfront in a single
-# thread.  Workers receive raw uint8 rows and call decode_batch on their own
-# slice, eliminating the long synchronous stall before training begins.
+# Workers only stack raw uint8 rows and hand them to the GPU; decode_batch_gpu
+# handles all field extraction on-device after the H2D transfer.
 # ---------------------------------------------------------------------------
 
 class _InfoSetDataset(Dataset):
@@ -323,20 +321,39 @@ class _InfoSetDataset(Dataset):
             return self.raw[idx], self.targets[idx], self.weights[idx]
         return self.raw[idx], self.targets[idx]
 
+def decode_batch_gpu(raw_gpu: torch.Tensor):
+    """Decodes a raw (N, 160) uint8 tensor natively on the GPU."""
+    N = raw_gpu.shape[0]
+    
+    # 1. Cards (Bytes 0-31): 4x 64-bit ints
+    cards_i64 = raw_gpu.view(torch.int64)[:, 0:4] 
+    shifts = torch.arange(52, device=raw_gpu.device, dtype=torch.int64)
+    bits = ((cards_i64.unsqueeze(-1) >> shifts) & 1).float()
+    bits = bits.view(N, 208)
+    
+    # 2. Floats (Bytes 32-147): 29x 32-bit floats
+    floats = raw_gpu.view(torch.float32)[:, 8:37]
+    
+    # 3. Bools (Bytes 154-158): 5x 8-bit ints (cast to float)
+    bools = raw_gpu[:, 154:159].float()
+    
+    # 4. Buckets (Bytes 148-153): 3x 16-bit ints
+    buckets = raw_gpu.view(torch.int16)[:, 74:77].long()
+    
+    x_cont = torch.cat([bits, floats, bools], dim=1)
+    
+    return x_cont, buckets
 
 def _collate_adv(batch):
     raw     = np.stack([b[0] for b in batch])
     targets = np.stack([b[1] for b in batch])
-    x_cont, buckets = decode_batch(raw)
-    return x_cont, buckets, torch.from_numpy(targets)
-
+    return torch.from_numpy(raw), torch.from_numpy(targets)
 
 def _collate_pol(batch):
     raw     = np.stack([b[0] for b in batch])
     targets = np.stack([b[1] for b in batch])
     weights = np.stack([b[2] for b in batch]).astype(np.float32)
-    x_cont, buckets = decode_batch(raw)
-    return x_cont, buckets, torch.from_numpy(targets), torch.from_numpy(weights)
+    return torch.from_numpy(raw), torch.from_numpy(targets), torch.from_numpy(weights)
 
 
 # ---------------------------------------------------------------------------
@@ -359,15 +376,17 @@ def train_advantage(
     dataset = _InfoSetDataset(raw_inputs, targets)
     loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True,
                          collate_fn=_collate_adv, pin_memory=True,
-                         num_workers=8, persistent_workers=True,
+                         num_workers=2, persistent_workers=True,
                          prefetch_factor=4)
     net.train()
     losses = []
 
     for _ in range(epochs):
         total = 0.0
-        for xc, b, t in loader:
-            xc, b, t = xc.to(device, non_blocking=True), b.to(device, non_blocking=True), t.to(device, non_blocking=True)
+        for raw, t in loader:
+            raw = raw.to(device, non_blocking=True)
+            t   = t  .to(device, non_blocking=True)
+            xc, b = decode_batch_gpu(raw)
             optimizer.zero_grad()
             # Illegal actions are stored as NaN; exclude them from the loss so
             # the network does not learn a spurious target of 0 for those slots.
@@ -411,16 +430,18 @@ def train_policy(
     dataset = _InfoSetDataset(raw_inputs, targets, weights)
     loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True,
                          collate_fn=_collate_pol, pin_memory=True,
-                         num_workers=8, persistent_workers=True)
+                         num_workers=2, persistent_workers=True)
     net.train()
     losses = []
 
     for ep in range(1, epochs + 1):
         ep_t0 = _time.perf_counter()
         total = 0.0
-        for xc, b, t, wt in loader:
-            xc, b, t, wt = (xc.to(device, non_blocking=True), b.to(device, non_blocking=True),
-                             t.to(device, non_blocking=True), wt.to(device, non_blocking=True))
+        for raw, t, wt in loader:
+            raw, t, wt = (raw.to(device, non_blocking=True),
+                          t  .to(device, non_blocking=True),
+                          wt .to(device, non_blocking=True))
+            xc, b = decode_batch_gpu(raw)
             optimizer.zero_grad()
             # Normalise weights within the mini-batch so they sum to 1,
             # preventing the loss magnitude from scaling with iteration number.
