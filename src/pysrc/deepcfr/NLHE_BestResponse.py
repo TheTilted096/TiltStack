@@ -187,6 +187,8 @@ def main():
     ckpt_dir = Path(__file__).parent.parent.parent / "br_checkpoints"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
 
     # ---- Header -------------------------------------------------------------
     samples_str = (f"{args.samples/1e6:.1f}M" if args.samples >= 1_000_000
