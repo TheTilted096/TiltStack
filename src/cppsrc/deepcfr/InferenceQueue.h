@@ -37,4 +37,17 @@ class InferenceQueue {
         ready.pop();
         return s;
     }
+
+    // Non-blocking: atomically returns everything currently in the queue
+    // (including nullptr sentinels) without waiting. Called immediately after
+    // pop() to coalesce all already-waiting batches into one GPU call.
+    std::vector<Scheduler *> drain() {
+        std::unique_lock lock(mtx);
+        std::vector<Scheduler *> result;
+        while (!ready.empty()) {
+            result.push_back(ready.front());
+            ready.pop();
+        }
+        return result;
+    }
 };

@@ -81,23 +81,35 @@ def _eta(secs: float) -> str:
 def run_inference_loop(orch, adv_nets, device):
     done = 0
     while done < orch.num_threads():
-        sched = orch.pop()
-        if sched is None:
-            done += 1
+        # Block until at least one batch is ready, then drain any additional
+        # batches that are already waiting — all get fused into one GPU call.
+        first = orch.pop()
+        rest  = orch.drain()
+
+        scheds = []
+        for item in [first] + list(rest):
+            if item is None:
+                done += 1
+            else:
+                scheds.append(item)
+
+        if not scheds:
             continue
 
-        n   = sched.batch_size()
-        raw = np.array(sched.input_data(), copy=False)
+        sizes   = [s.batch_size() for s in scheds]
+        raws    = [np.array(s.input_data(), copy=False) for s in scheds]
+        raw_cat = np.concatenate(raws, axis=0) if len(raws) > 1 else raws[0]
 
-        x_cont, buckets = decode_batch_gpu(torch.from_numpy(raw).to(device, non_blocking=True))
+        x_cont, buckets = decode_batch_gpu(
+            torch.from_numpy(raw_cat).to(device, non_blocking=True))
 
-        struct       = raw.ravel().view(infoset_dtype)
+        struct       = raw_cat.ravel().view(infoset_dtype)
         is_p0_acting = struct['is_button']
 
         p0_idx = np.where( is_p0_acting)[0]
         p1_idx = np.where(~is_p0_acting)[0]
 
-        out = np.empty((n, NUM_ACTIONS), dtype=np.float32)
+        out = np.empty((raw_cat.shape[0], NUM_ACTIONS), dtype=np.float32)
 
         with torch.no_grad(), torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             if len(p0_idx) > 0:
@@ -107,8 +119,11 @@ def run_inference_loop(orch, adv_nets, device):
                 out[p1_idx] = adv_nets[1](
                     x_cont[p1_idx], buckets[p1_idx]).float().cpu().numpy()
 
-        sched.output_data()[:] = out
-        sched.submit_batch()
+        offset = 0
+        for s, sz in zip(scheds, sizes):
+            s.output_data()[:] = out[offset:offset + sz]
+            s.submit_batch()
+            offset += sz
 
 
 # ---------------------------------------------------------------------------

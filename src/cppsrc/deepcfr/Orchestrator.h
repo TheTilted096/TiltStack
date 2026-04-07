@@ -39,6 +39,10 @@ class Orchestrator {
     // waitIteration().
     Scheduler *pop() { return iq.pop(); }
 
+    // Non-blocking drain — returns all schedulers already in the queue without
+    // waiting. Call immediately after pop() to coalesce ready batches.
+    std::vector<Scheduler *> drain() { return iq.drain(); }
+
     int numThreads() const { return numThreads_; }
 
     // Reset all per-thread replay buffers. Call after waitIteration() and

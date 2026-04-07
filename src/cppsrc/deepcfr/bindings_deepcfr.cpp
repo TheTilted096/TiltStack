@@ -261,6 +261,23 @@ PYBIND11_MODULE(deepcfr, m) {
             },
             py::return_value_policy::reference)
 
+        // Non-blocking drain — returns a list of all Schedulers already
+        // waiting in the queue. None entries are sentinels (worker finished).
+        // Call immediately after pop() to coalesce ready batches into one
+        // GPU forward pass.
+        .def("drain",
+             [](Orchestrator &o) -> py::list {
+                 py::list result;
+                 for (Scheduler *s : o.drain()) {
+                     if (s == nullptr)
+                         result.append(py::none());
+                     else
+                         result.append(
+                             py::cast(s, py::return_value_policy::reference));
+                 }
+                 return result;
+             })
+
         .def("clear_buffers", &Orchestrator::clearBuffers)
         .def("drain_pool", &Orchestrator::drainPool);
 }

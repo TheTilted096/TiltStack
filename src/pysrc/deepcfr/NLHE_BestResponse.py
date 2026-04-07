@@ -81,27 +81,33 @@ def run_inference_loop(orch, hero: bool, adv_nets, policy_net, device):
     """
     done = 0
     while done < orch.num_threads():
-        sched = orch.pop()
-        if sched is None:
-            done += 1
+        first = orch.pop()
+        rest  = orch.drain()
+
+        scheds = []
+        for item in [first] + list(rest):
+            if item is None:
+                done += 1
+            else:
+                scheds.append(item)
+
+        if not scheds:
             continue
 
-        n   = sched.batch_size()
-        raw = np.array(sched.input_data(), copy=False)
+        sizes   = [s.batch_size() for s in scheds]
+        raws    = [np.array(s.input_data(), copy=False) for s in scheds]
+        raw_cat = np.concatenate(raws, axis=0) if len(raws) > 1 else raws[0]
 
-        x_cont, buckets = decode_batch_gpu(torch.from_numpy(raw).to(device, non_blocking=True))
+        x_cont, buckets = decode_batch_gpu(
+            torch.from_numpy(raw_cat).to(device, non_blocking=True))
 
-        struct     = raw.ravel().view(infoset_dtype)
-        is_button  = struct['is_button']          # True  → stm is P0 (SB)
-
-        # is_button==True  → stm is P0;  hero==False → P0 is hero  → hero's turn
-        # is_button==False → stm is P1;  hero==True  → P1 is hero  → hero's turn
-        # Combined: hero's turn iff (is_button != hero)
-        is_villain = is_button == hero            # bool array, shape (n,)
-        hero_idx   = np.where(~is_villain)[0]
+        struct     = raw_cat.ravel().view(infoset_dtype)
+        is_button  = struct['is_button']
+        is_villain = is_button == hero
+        hero_idx    = np.where(~is_villain)[0]
         villain_idx = np.where( is_villain)[0]
 
-        out = np.empty((n, NUM_ACTIONS), dtype=np.float32)
+        out = np.empty((raw_cat.shape[0], NUM_ACTIONS), dtype=np.float32)
 
         with torch.no_grad(), torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             if len(hero_idx) > 0:
@@ -113,8 +119,11 @@ def run_inference_loop(orch, hero: bool, adv_nets, policy_net, device):
                     x_cont[villain_idx], buckets[villain_idx])
                 out[villain_idx] = F.softmax(logits, dim=1).float().cpu().numpy()
 
-        sched.output_data()[:] = out
-        sched.submit_batch()
+        offset = 0
+        for s, sz in zip(scheds, sizes):
+            s.output_data()[:] = out[offset:offset + sz]
+            s.submit_batch()
+            offset += sz
 
 
 # ---------------------------------------------------------------------------
