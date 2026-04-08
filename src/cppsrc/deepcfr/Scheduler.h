@@ -3,6 +3,7 @@
 #include "CFRTypes.h"
 #include "Coroutine.h"
 #include "InferenceQueue.h"
+#include "Reservoir.h"
 
 #include <condition_variable>
 #include <coroutine>
@@ -54,7 +55,12 @@ class Scheduler {
     friend struct InferenceAwaitable;
 
   public:
-    explicit Scheduler(InferenceQueue &q) : inferenceQueue(q) {}
+    int threadId;
+    Reservoir* advReservoir = nullptr;
+    Reservoir* polReservoir = nullptr;
+
+    explicit Scheduler(InferenceQueue &q, int threadId)
+        : inferenceQueue(q), threadId(threadId) {}
 
     // ---- Replay buffers — appended to by DeepCFR::rollout() -----------------
     std::vector<InfoSet> advantageInputs;

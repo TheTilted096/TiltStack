@@ -127,20 +127,6 @@ def run_inference_loop(orch, hero: bool, adv_nets, policy_net, device):
 
 
 # ---------------------------------------------------------------------------
-# Data collection (advantage only — policy samples are discarded)
-# ---------------------------------------------------------------------------
-
-def collect_advantage(orch, hero: bool, adv_res: list) -> None:
-    player = int(hero)
-    for sched in orch.schedulers:
-        if sched.advantage_size() > 0:
-            adv_res[player].add(
-                np.array(sched.advantage_input_data(),  copy=True),
-                np.array(sched.advantage_output_data(), copy=True),
-            )
-
-
-# ---------------------------------------------------------------------------
 # Checkpointing
 # ---------------------------------------------------------------------------
 
@@ -163,11 +149,15 @@ def load_policy_net(policy_ckpt: str, device) -> DeepCFRNet:
     net = DeepCFRNet().to(device)
     # Support both old format (strat_net) and new format (net)
     if "net" in ckpt:
-        net.load_state_dict(ckpt["net"])
+        sd = ckpt["net"]
     elif "strat_net" in ckpt:
-        net.load_state_dict(ckpt["strat_net"])
+        sd = ckpt["strat_net"]
     else:
         raise KeyError("Checkpoint must contain either 'net' or 'strat_net' key")
+    # Strip _orig_mod. prefix added by torch.compile when saving state_dict
+    if any(k.startswith("_orig_mod.") for k in sd):
+        sd = {k.removeprefix("_orig_mod."): v for k, v in sd.items()}
+    net.load_state_dict(sd)
     net.eval()
     return net
 
@@ -226,11 +216,13 @@ def main():
     print(f"[{_ts()}]  Compiled in {time.perf_counter() - _t_compile:.1f}s\n")
 
     seed = 0xdeadbeefcafe1234 if args.seed is None else args.seed
-    orch = deepcfr.Orchestrator(args.threads, seed)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    adv_res = [Reservoir(RESERVOIR_CAPACITY, deepcfr.INFOSET_BYTES)
+    adv_res = [Reservoir(RESERVOIR_CAPACITY, args.threads, deepcfr.INFOSET_BYTES)
                for _ in range(2)]
+    orch = deepcfr.Orchestrator(args.threads,
+                                adv_res[0]._cpp, adv_res[1]._cpp,
+                                seed=seed)
 
     # ---- Training loop ------------------------------------------------------
     iter_times = []
@@ -252,12 +244,7 @@ def main():
             rollout_secs = time.perf_counter() - t0
 
             rollouts = sum(s.rollout_count() for s in orch.schedulers)
-            t0_collect = time.perf_counter()
-            collect_advantage(orch, hero, adv_res)
-            collect_secs = time.perf_counter() - t0_collect
-            t0_clear = time.perf_counter()
             orch.clear_buffers()
-            clear_secs = time.perf_counter() - t0_clear
 
             adv_new  = adv_res[player].n_seen - adv_before
             adv_size = adv_res[player].size
@@ -268,7 +255,6 @@ def main():
                   f"  ·  {_rate(adv_new, rollout_secs)} infosets/s")
             print(f"    advantage  +{_fmt(adv_new):<12}"
                   f"  reservoir  {_fmt(adv_size):>12} / {cap_str}")
-            print(f"    collect={collect_secs:.1f}s  clear={clear_secs:.1f}s")
 
             # -- Advantage training -------------------------------------------
             n_adv = adv_res[player].size

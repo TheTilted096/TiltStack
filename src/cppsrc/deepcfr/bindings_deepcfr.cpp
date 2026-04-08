@@ -5,6 +5,7 @@
 #include "CFRGame.h"
 #include "CFRUtils.h"
 #include "Orchestrator.h"
+#include "Reservoir.h"
 
 namespace py = pybind11;
 
@@ -229,10 +230,54 @@ PYBIND11_MODULE(deepcfr, m) {
         .def("rollout_count", &Scheduler::rolloutCount);
 
     // -------------------------------------------------------------------------
+    // Reservoir
+    //
+    // Python owns the numpy arrays (for pinned-memory / zero-copy PyTorch
+    // access); the C++ Reservoir writes into them directly from worker threads
+    // during flushBatch(), overlapping reservoir writes with GPU inference.
+    //
+    // The numpy arrays must remain valid for the lifetime of the Reservoir and
+    // any Orchestrator that holds a pointer to it.
+    // -------------------------------------------------------------------------
+    py::class_<Reservoir>(m, "Reservoir")
+        .def(py::init([](std::size_t capacity, int numThreads,
+                         py::array_t<uint8_t, py::array::c_style> inputs,
+                         py::array_t<float,   py::array::c_style> targets,
+                         py::object weights) {
+                int32_t* wptr = nullptr;
+                if (!weights.is_none())
+                    wptr = weights.cast<
+                        py::array_t<int32_t, py::array::c_style>>()
+                        .mutable_data();
+                return new Reservoir(capacity, numThreads,
+                                     inputs.mutable_data(),
+                                     targets.mutable_data(),
+                                     wptr);
+             }),
+             py::arg("capacity"), py::arg("num_threads"),
+             py::arg("inputs"), py::arg("targets"),
+             py::arg("weights") = py::none())
+        .def_property_readonly("n_seen", [](const Reservoir& r) {
+            return r.nSeen.load(std::memory_order_relaxed);
+        })
+        .def("size", &Reservoir::size);
+
+    // -------------------------------------------------------------------------
     // Orchestrator
     // -------------------------------------------------------------------------
     py::class_<Orchestrator>(m, "Orchestrator")
-        .def(py::init<int, uint64_t>(), py::arg("num_threads"),
+        .def(py::init([](int numThreads,
+                         Reservoir& advRes0, Reservoir& advRes1,
+                         py::object polResObj, uint64_t seed) {
+                Reservoir* polPtr = polResObj.is_none()
+                    ? nullptr : &polResObj.cast<Reservoir&>();
+                return new Orchestrator(numThreads,
+                                        &advRes0, &advRes1, polPtr, seed);
+             }),
+             py::keep_alive<1, 2>(), py::keep_alive<1, 3>(),
+             py::arg("num_threads"),
+             py::arg("adv_res0"), py::arg("adv_res1"),
+             py::arg("pol_res") = py::none(),
              py::arg("seed") = (uint64_t)0xdeadbeefcafe1234ULL)
 
         .def_readonly("schedulers", &Orchestrator::schedulerPtrs,

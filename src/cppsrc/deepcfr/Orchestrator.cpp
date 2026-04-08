@@ -3,8 +3,11 @@
 #include "CFRUtils.h"
 #include "DeepCFR.h"
 
-Orchestrator::Orchestrator(int numThreads, uint64_t seed)
-    : numThreads_(numThreads), seed_(seed) {
+Orchestrator::Orchestrator(int numThreads,
+                           Reservoir* advRes0, Reservoir* advRes1,
+                           Reservoir* polRes, uint64_t seed)
+    : numThreads_(numThreads), seed_(seed),
+      advReservoirs_{advRes0, advRes1}, polReservoir_(polRes) {
     // g_indexer is initialised by loadTables(), which callers must invoke
     // before constructing an Orchestrator.
 
@@ -36,7 +39,8 @@ void Orchestrator::startIteration(bool hero, int t, int totalSamples) {
         std::unique_lock lock(mtx_);
         currentHero_ = hero;
         currentT_ = t;
-        samplesPerThread_ = totalSamples / numThreads_;
+        totalSamples_  = totalSamples;
+        nSeenAtStart_  = advReservoirs_[hero]->nSeen.load(std::memory_order_relaxed);
         threadsActive_ = numThreads_;
         iterReady_ = true;
     }
@@ -64,7 +68,7 @@ void Orchestrator::clearBuffers() {
 }
 
 void Orchestrator::runWorker(int threadIdx) {
-    Scheduler sched(iq);
+    Scheduler sched(iq, threadIdx);
 
     // Register this thread's Scheduler so Python can access training data.
     {
@@ -81,16 +85,13 @@ void Orchestrator::runWorker(int threadIdx) {
 
     while (true) {
         // Wait for startIteration() or drainPool().
-        bool hero;
-        int t, target;
         {
             std::unique_lock lock(mtx_);
             startCV_.wait(lock, [this] { return iterReady_ || shutdown_; });
             if (shutdown_)
                 break;
-            hero = currentHero_;
-            t = currentT_;
-            target = samplesPerThread_;
+            sched.advReservoir = advReservoirs_[currentHero_];
+            sched.polReservoir = polReservoir_;
         }
 
         sched.clearBuffers();
@@ -99,8 +100,8 @@ void Orchestrator::runWorker(int threadIdx) {
             // Fill the initial pool.
             for (int i = 0; i < POOL_SIZE; i++) {
                 CFRGame g;
-                g.begin(STARTING_STACK, STARTING_STACK, hero);
-                sched.spawn(DeepCFR::rollout(std::move(g), hero, t, sched));
+                g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
+                sched.spawn(DeepCFR::rollout(std::move(g), currentHero_, currentT_, sched));
             }
 
             // Run until the sample quota is met and all active rollouts have
@@ -108,12 +109,12 @@ void Orchestrator::runWorker(int threadIdx) {
             while (sched.activeTasks() > 0) {
                 sched.runOneBatch();
                 int completed = sched.purgeCompleted();
-                if (sched.advantageSize() < target)
+                if (sched.advReservoir->nSeen - nSeenAtStart_ < static_cast<std::size_t>(totalSamples_))
                     for (int i = 0; i < completed; i++) {
                         CFRGame g;
-                        g.begin(STARTING_STACK, STARTING_STACK, hero);
+                        g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
                         sched.spawn(
-                            DeepCFR::rollout(std::move(g), hero, t, sched));
+                            DeepCFR::rollout(std::move(g), currentHero_, currentT_, sched));
                     }
             }
         } catch (...) {
@@ -125,6 +126,13 @@ void Orchestrator::runWorker(int threadIdx) {
                     workerException_ = std::current_exception();
             }
         }
+
+        // Flush any data accumulated after the last flushBatch() — rollouts
+        // that completed without triggering another inference round.
+        if (sched.advReservoir)
+            sched.advReservoir->insert(threadIdx, sched.advantageInputs, sched.advantageOutputs);
+        if (sched.polReservoir)
+            sched.polReservoir->insert(threadIdx, sched.policyInputs, sched.policyOutputs, &sched.policyWeights);
 
         // Always push the sentinel so Python's pop() loop is not left hanging,
         // regardless of whether the work block succeeded or threw.

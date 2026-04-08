@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Reservoir.h"
 #include "Scheduler.h"
 
 #include <atomic>
@@ -18,8 +19,12 @@ class Orchestrator {
     std::vector<Scheduler *>
         schedulerPtrs; // valid for the lifetime of threadPool_
 
-    explicit Orchestrator(int numThreads,
-                          uint64_t seed = 0xdeadbeefcafe1234ULL);
+    // advReservoirs[0] collects hero=false advantage data; [1] for hero=true.
+    // polReservoir collects policy data from both sides.
+    // All three must remain valid for the lifetime of the Orchestrator.
+    Orchestrator(int numThreads,
+                 Reservoir* advRes0, Reservoir* advRes1, Reservoir* polRes,
+                 uint64_t seed = 0xdeadbeefcafe1234ULL);
     ~Orchestrator();
 
     // Signal all threads to exit and join them.
@@ -53,11 +58,15 @@ class Orchestrator {
     int numThreads_;
     uint64_t seed_;
 
+    Reservoir* advReservoirs_[2];
+    Reservoir* polReservoir_;
+
     // Per-iteration parameters written by startIteration(), read by workers
     // while holding mtx_ at wakeup.
     bool currentHero_ = false;
     int currentT_ = 0;
-    int samplesPerThread_ = 0;
+    int         totalSamples_  = 0;
+    std::size_t nSeenAtStart_  = 0;
 
     std::atomic<int> threadsActive_{0};
     int registeredCount_ = 0;

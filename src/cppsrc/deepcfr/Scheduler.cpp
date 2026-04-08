@@ -81,6 +81,20 @@ void Scheduler::flushBatch() {
     }
     inferenceQueue.push(this);
 
+    // While Python is running GPU inference, write accumulated data to the
+    // global reservoirs. This overlaps reservoir writes with GPU computation,
+    // eliminating the serial post-iteration collection phase entirely.
+    if (advReservoir)
+        advReservoir->insert(threadId, advantageInputs, advantageOutputs);
+    if (polReservoir)
+        polReservoir->insert(threadId, policyInputs, policyOutputs, &policyWeights);
+
+    advantageInputs.clear();
+    advantageOutputs.clear();
+    policyInputs.clear();
+    policyOutputs.clear();
+    policyWeights.clear();
+
     {
         std::unique_lock lock(batchMutex);
         cv.wait(lock, [this] { return batchComplete; });

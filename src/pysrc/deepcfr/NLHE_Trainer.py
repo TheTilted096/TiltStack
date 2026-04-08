@@ -42,6 +42,7 @@ from network_training import (
     CONT_DIM, NUM_STREETS,
 )
 
+
 RESERVOIR_CAPACITY = 100_000_000
 
 
@@ -127,27 +128,6 @@ def run_inference_loop(orch, adv_nets, device):
 
 
 # ---------------------------------------------------------------------------
-# Data collection
-# ---------------------------------------------------------------------------
-
-def collect_into_reservoirs(orch, hero: bool,
-                             adv_res: list, strat_res: 'Reservoir') -> None:
-    player = int(hero)
-    for sched in orch.schedulers:
-        if sched.advantage_size() > 0:
-            adv_res[player].add(
-                np.array(sched.advantage_input_data(),  copy=True),
-                np.array(sched.advantage_output_data(), copy=True),
-            )
-        if sched.policy_size() > 0:
-            strat_res.add(
-                np.array(sched.policy_input_data(),  copy=True),
-                np.array(sched.policy_output_data(), copy=True),
-                np.array(sched.policy_weight_data(), copy=True),
-            )
-
-
-# ---------------------------------------------------------------------------
 # Checkpointing
 # ---------------------------------------------------------------------------
 
@@ -216,13 +196,15 @@ def main():
     print(f"[{_ts()}]  Compiled in {time.perf_counter() - _t_compile:.1f}s\n")
 
     seed = 0xdeadbeefcafe1234 if args.seed is None else args.seed
-    orch = deepcfr.Orchestrator(args.threads, seed)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    adv_res   = [Reservoir(RESERVOIR_CAPACITY, deepcfr.INFOSET_BYTES)
+    adv_res   = [Reservoir(RESERVOIR_CAPACITY, args.threads, deepcfr.INFOSET_BYTES)
                  for _ in range(2)]
-    strat_res =  Reservoir(RESERVOIR_CAPACITY, deepcfr.INFOSET_BYTES,
+    strat_res =  Reservoir(RESERVOIR_CAPACITY, args.threads, deepcfr.INFOSET_BYTES,
                            has_weights=True)
+    orch = deepcfr.Orchestrator(args.threads,
+                                adv_res[0]._cpp, adv_res[1]._cpp, strat_res._cpp,
+                                seed)
 
     # ---- Training loop ------------------------------------------------------
     iter_times = []
@@ -245,12 +227,7 @@ def main():
             rollout_secs = time.perf_counter() - t0
 
             rollouts = sum(s.rollout_count() for s in orch.schedulers)
-            t0_collect = time.perf_counter()
-            collect_into_reservoirs(orch, hero, adv_res, strat_res)
-            collect_secs = time.perf_counter() - t0_collect
-            t0_clear = time.perf_counter()
             orch.clear_buffers()
-            clear_secs = time.perf_counter() - t0_clear
 
             adv_new   = adv_res[player].n_seen - adv_before
             pol_new   = strat_res.n_seen - pol_before
@@ -265,7 +242,6 @@ def main():
                   f"  reservoir  {_fmt(adv_size):>12} / {cap_str}")
             print(f"    policy     +{_fmt(pol_new):<12}"
                   f"  reservoir  {_fmt(pol_size):>12} / {cap_str}")
-            print(f"    collect={collect_secs:.1f}s  clear={clear_secs:.1f}s")
 
             # -- Advantage training -------------------------------------------
             n_adv = adv_res[player].size

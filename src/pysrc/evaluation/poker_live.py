@@ -108,7 +108,10 @@ class PokerLive:
         # Load strategy network
         ckpt = torch.load(net_path, map_location=device, weights_only=True)
         net  = DeepCFRNet()
-        net.load_state_dict(ckpt['net'])
+        sd = ckpt['net']
+        if any(k.startswith("_orig_mod.") for k in sd):
+            sd = {k.removeprefix("_orig_mod."): v for k, v in sd.items()}
+        net.load_state_dict(sd)
         self.model = net.to(self.device).eval()
 
         # OpenSpiel game (stateless, shared)

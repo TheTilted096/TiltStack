@@ -34,6 +34,7 @@ setup(
             'deepcfr',
             sources=[
                 'cppsrc/deepcfr/bindings_deepcfr.cpp',
+                'cppsrc/deepcfr/Reservoir.cpp',
                 'cppsrc/deepcfr/Orchestrator.cpp',
                 'cppsrc/deepcfr/Scheduler.cpp',
                 'cppsrc/deepcfr/DeepCFR.cpp',

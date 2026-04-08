@@ -25,6 +25,7 @@ pipeline assigns labels 0-indexed, so CFRGame stores `label + 1` for reached
 streets and leaves unreached streets at their zero-initialised default.
 """
 
+import deepcfr
 import numpy as np
 import torch
 import torch.nn as nn
@@ -217,86 +218,44 @@ class DeepCFRNet(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Reservoir sampling
+# Reservoir
 # ---------------------------------------------------------------------------
 
 class Reservoir:
     """
-    Fixed-capacity uniform reservoir (Algorithm R) with batch insertion.
+    Fixed-capacity reservoir backed by a C++ deepcfr.Reservoir.
 
-    Rather than processing items one at a time, add() evaluates accept
-    probabilities and picks replacement positions for an entire batch in
-    NumPy, then scatter-writes only the accepted items.  This keeps the
-    Python-loop overhead proportional to the number of accepted items
-    (O(K * ln(1 + B/n)) on average) rather than to the batch size B.
+    Python allocates the numpy buffers (for zero-copy PyTorch access).
+    Worker threads write into them directly via Reservoir.insert() during
+    flushBatch(), overlapping data collection with GPU inference and
+    eliminating the serial post-iteration collection phase entirely.
 
     Parameters
     ----------
     capacity     : maximum number of samples to retain
+    num_threads  : number of Orchestrator worker threads (determines slices)
     infoset_bytes: width of the raw InfoSet buffer (== deepcfr.INFOSET_BYTES)
     has_weights  : if True, allocate and maintain an int32 weight column
     """
 
-    def __init__(self, capacity: int, infoset_bytes: int,
+    def __init__(self, capacity: int, num_threads: int, infoset_bytes: int,
                  has_weights: bool = False):
         self.capacity = capacity
-        self.n_seen   = 0
-        self.inputs   = np.empty((capacity, infoset_bytes), dtype=np.uint8)
-        self.targets  = np.empty((capacity, NUM_ACTIONS),   dtype=np.float32)
-        self.weights  = np.empty(capacity, dtype=np.int32) if has_weights else None
-        self._rng     = np.random.default_rng()
+        self.inputs  = np.empty((capacity, infoset_bytes), dtype=np.uint8)
+        self.targets = np.empty((capacity, NUM_ACTIONS),   dtype=np.float32)
+        self.weights = np.empty(capacity, dtype=np.int32) if has_weights else None
+        self._cpp    = deepcfr.Reservoir(capacity, num_threads,
+                                         self.inputs, self.targets, self.weights)
+
+    @property
+    def n_seen(self) -> int:
+        """Total items ever offered (not clamped to capacity)."""
+        return self._cpp.n_seen
 
     @property
     def size(self) -> int:
-        """Number of valid (filled) entries in the reservoir."""
-        return min(self.n_seen, self.capacity)
-
-    def add(self, new_inputs: np.ndarray, new_targets: np.ndarray,
-            new_weights: np.ndarray | None = None) -> None:
-        """
-        Offer a batch of B samples to the reservoir.
-
-        The first samples fill empty slots directly.  For subsequent samples
-        at stream position m (1-indexed), each is accepted with probability
-        capacity/m and replaces a uniformly random existing slot.
-
-        When two accepted items in the same batch target the same slot, the
-        later one wins — a negligible bias when B << capacity.
-        """
-        B = len(new_inputs)
-        K = self.capacity
-        n = self.n_seen
-
-        # Phase 1: fill remaining empty slots directly.
-        fill = min(max(K - n, 0), B)
-        if fill > 0:
-            self.inputs [n:n + fill] = new_inputs [:fill]
-            self.targets[n:n + fill] = new_targets[:fill]
-            if self.weights is not None and new_weights is not None:
-                self.weights[n:n + fill] = new_weights[:fill]
-
-        # Phase 2: reservoir-sample the remaining items.
-        rest = B - fill
-        if rest > 0:
-            ri = new_inputs [fill:]
-            rt = new_targets[fill:]
-            rw = new_weights[fill:] if (self.weights is not None
-                                        and new_weights is not None) else None
-
-            # 1-indexed stream positions of these items.
-            m = np.arange(n + fill + 1, n + B + 1, dtype=np.float64)
-
-            # Accept each with probability K/m; pick a replacement slot.
-            accept = self._rng.random(rest) * m < K
-            if accept.any():
-                idx = np.where(accept)[0]
-                pos = self._rng.integers(0, K, size=len(idx))
-                self.inputs [pos] = ri[idx]
-                self.targets[pos] = rt[idx]
-                if self.weights is not None and rw is not None:
-                    self.weights[pos] = rw[idx]
-
-        self.n_seen += B
+        """Number of valid (filled) entries: min(n_seen, capacity)."""
+        return self._cpp.size()
 
 
 def decode_batch_gpu(raw_gpu: torch.Tensor):

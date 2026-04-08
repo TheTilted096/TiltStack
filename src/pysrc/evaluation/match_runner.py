@@ -132,7 +132,10 @@ def main():
     def _load_net(path):
         ckpt = torch.load(path, map_location=args.device, weights_only=True)
         net  = DeepCFRNet()
-        net.load_state_dict(ckpt['net'])
+        sd = ckpt['net']
+        if any(k.startswith("_orig_mod.") for k in sd):
+            sd = {k.removeprefix("_orig_mod."): v for k, v in sd.items()}
+        net.load_state_dict(sd)
         return net.to(args.device).eval()
 
     strat_net = _load_net(args.strat_net)
