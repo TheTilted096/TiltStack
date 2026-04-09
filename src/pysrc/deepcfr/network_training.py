@@ -165,55 +165,62 @@ class DeepCFRNet(nn.Module):
     """
     Shared architecture for both the advantage and strategy networks.
 
-        Input (338) → Linear(512) → ReLU
-                   → ResNet(512) → ReLU  (skip connection: ReLU(linear + input))
-                   → ResNet(512) → ReLU  (skip connection: ReLU(linear + input))
-                   → ResNet(512) → ReLU  (skip connection: ReLU(linear + input))
-                   → ResNet(512) → ReLU  (skip connection: ReLU(linear + input))
-                   → Linear(512 → 5)
+        Input (INPUT_DIM) → Linear(hidden_dim) → ReLU
+                          → ResidualBlock × num_res_blocks
+                          → Linear(hidden_dim → num_actions)
 
     Street buckets are passed as integer indices (N, 3) — columns are flop,
-    turn, river — and embedded into EMBED_DIM-dimensional vectors before
+    turn, river — and embedded into embed_dim-dimensional vectors before
     concatenation with the continuous features.  Each street has its own
     embedding table so the flop table can be smaller (2049 vs 8193 entries).
     Index 0 is treated as a padding token (all-zeros, not trained) in each
     table, representing an unreached street.
+
+    All parameters default to the current training configuration so that
+    existing checkpoints load without arguments.  To load a checkpoint with a
+    different architecture, pass the detected hyperparameters or use the
+    standalone `load_net_auto` helper in match_runner.py.
+
+    Residual blocks are registered as `res_block1`, `res_block2`, … so that
+    checkpoints saved under the original fixed-four-block layout remain
+    compatible regardless of the `num_res_blocks` setting.
     """
 
-    def __init__(self, embed_dim: int = EMBED_DIM):
+    def __init__(
+        self,
+        embed_dim:      int = EMBED_DIM,
+        hidden_dim:     int = 512,
+        num_res_blocks: int = 4,
+        flop_buckets:   int = FLOP_BUCKETS,
+        turn_buckets:   int = TURN_BUCKETS,
+        river_buckets:  int = RIVER_BUCKETS,
+        num_actions:    int = NUM_ACTIONS,
+    ):
         super().__init__()
-        self.flop_embed  = nn.Embedding(FLOP_BUCKETS,  embed_dim, padding_idx=0)
-        self.turn_embed  = nn.Embedding(TURN_BUCKETS,  embed_dim, padding_idx=0)
-        self.river_embed = nn.Embedding(RIVER_BUCKETS, embed_dim, padding_idx=0)
-        self.linear1 = nn.Linear(INPUT_DIM, 512)
-        self.res_block1 = ResidualBlock(512)
-        self.res_block2 = ResidualBlock(512)
-        self.res_block3 = ResidualBlock(512)
-        self.res_block4 = ResidualBlock(512)
-        self.output = nn.Linear(512, NUM_ACTIONS)
+        input_dim = CONT_DIM + NUM_STREETS * embed_dim
+        self.flop_embed  = nn.Embedding(flop_buckets,  embed_dim, padding_idx=0)
+        self.turn_embed  = nn.Embedding(turn_buckets,  embed_dim, padding_idx=0)
+        self.river_embed = nn.Embedding(river_buckets, embed_dim, padding_idx=0)
+        self.linear1 = nn.Linear(input_dim, hidden_dim)
+        for i in range(1, num_res_blocks + 1):
+            setattr(self, f'res_block{i}', ResidualBlock(hidden_dim))
+        self.output = nn.Linear(hidden_dim, num_actions)
+        self._num_res_blocks = num_res_blocks
 
     def forward(self, x_cont: torch.Tensor, buckets: torch.Tensor) -> torch.Tensor:
         """
         x_cont  : (N, CONT_DIM)   float32
         buckets : (N, NUM_STREETS) int64   — columns: [flop, turn, river]
-        returns : (N, NUM_ACTIONS) float32
+        returns : (N, num_actions) float32
         """
-        e_flop  = self.flop_embed (buckets[:, 0])  # (N, 32)
-        e_turn  = self.turn_embed (buckets[:, 1])  # (N, 32)
-        e_river = self.river_embed(buckets[:, 2])  # (N, 32)
-        embeds  = torch.cat([e_flop, e_turn, e_river], dim=1)  # (N, 96)
-        x = torch.cat([x_cont, embeds], dim=1)                 # (N, 338)
+        e_flop  = self.flop_embed (buckets[:, 0])
+        e_turn  = self.turn_embed (buckets[:, 1])
+        e_river = self.river_embed(buckets[:, 2])
+        x = torch.cat([x_cont, e_flop, e_turn, e_river], dim=1)
 
-        # First linear layer
-        x = F.relu(self.linear1(x))  # (N, 256)
-
-        # Four 2-layer residual blocks
-        x = self.res_block1(x)
-        x = self.res_block2(x)
-        x = self.res_block3(x)
-        x = self.res_block4(x)
-
-        # Output layer
+        x = F.relu(self.linear1(x))
+        for i in range(1, self._num_res_blocks + 1):
+            x = getattr(self, f'res_block{i}')(x)
         return self.output(x)
 
 
