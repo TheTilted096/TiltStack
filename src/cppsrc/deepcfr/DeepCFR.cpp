@@ -85,9 +85,11 @@ Task<float> traverse(CFRGame &game, bool hero, int t, Scheduler &sched) {
         co_return nodeEV;
     }
 
-    sched.policyInputs.push_back(game.getInfo());
-    sched.policyOutputs.push_back(instantStrategy);
-    sched.policyWeights.push_back(t);
+    if (t > 50) {
+        sched.policyInputs.push_back(game.getInfo());
+        sched.policyOutputs.push_back(instantStrategy);
+        sched.policyWeights.push_back(t);
+    }
 
     Action villainMove = sampleAction(instantStrategy, moves, numMoves);
     game.makeMove(villainMove);

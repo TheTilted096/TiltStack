@@ -91,7 +91,7 @@ void Orchestrator::runWorker(int threadIdx) {
             if (shutdown_)
                 break;
             sched.advReservoir = advReservoirs_[currentHero_];
-            sched.polReservoir = polReservoir_;
+            sched.polReservoir = (currentT_ > 50) ? polReservoir_ : nullptr;
         }
 
         sched.clearBuffers();

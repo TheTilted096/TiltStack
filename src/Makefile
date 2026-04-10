@@ -79,7 +79,7 @@ tidy:
 
 # ---------------------------------------------------------------------------
 clean:
-	rm -rf build *.egg-info pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*
+	rm -rf build runs *.egg-info pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*
 
 clean-hard:
-	rm -rf build clusters checkpoints br_checkpoints *.egg-info pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*
+	rm -rf build runs clusters checkpoints br_checkpoints *.egg-info pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*

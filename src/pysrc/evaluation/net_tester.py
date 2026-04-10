@@ -31,7 +31,7 @@ _EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_EVAL_DIR, '..', 'deepcfr'))
 
 import deepcfr
-from tilt_agents import TiltStack_DeepCFR, Anti_TiltStack_NBR
+from tilt_agents import TiltStack_DeepCFR, Anti_TiltStack_NBR, load_net_auto
 from network_training import DeepCFRNet
 
 # ---------------------------------------------------------------------------
@@ -129,18 +129,9 @@ def main():
     deepcfr.load_tables(_clusters)
 
     # 2. Load networks
-    def _load_net(path):
-        ckpt = torch.load(path, map_location=args.device, weights_only=True)
-        net  = DeepCFRNet()
-        sd = ckpt['net']
-        if any(k.startswith("_orig_mod.") for k in sd):
-            sd = {k.removeprefix("_orig_mod."): v for k, v in sd.items()}
-        net.load_state_dict(sd)
-        return net.to(args.device).eval()
-
-    strat_net = _load_net(args.net)
-    br_net0   = _load_net(args.br0)
-    br_net1   = _load_net(args.br1)
+    strat_net = load_net_auto(args.net,  args.device)
+    br_net0   = load_net_auto(args.br0,  args.device)
+    br_net1   = load_net_auto(args.br1,  args.device)
 
     # 3. Initialise OpenSpiel game
     game = pyspiel.load_game(GAME_STRING)

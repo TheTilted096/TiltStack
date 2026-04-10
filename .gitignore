@@ -16,3 +16,4 @@ saves/
 *.bin
 
 src/*.txt
+runs/

@@ -28,4 +28,6 @@ dependencies:
   # ---- PyPI Packages ----
   - pip
   - pip:
+      - setuptools<72                             # Provides pkg_resources (removed in setuptools 72+)
+      - tensorboard                               # Training loss visualization
       - open_spiel                                # OpenSpiel poker engine (evaluation only)

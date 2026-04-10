@@ -145,81 +145,65 @@ def decode_batch(raw: np.ndarray):
 # Network
 # ---------------------------------------------------------------------------
 
+HIDDEN_DIM     = 1024
+NUM_RES_BLOCKS = 4
+
+
 class ResidualBlock(nn.Module):
     """A standard 2-layer residual block for MLPs."""
-    def __init__(self, dim: int = 512):
+    def __init__(self):
         super().__init__()
-        self.fc1 = nn.Linear(dim, dim)
-        self.fc2 = nn.Linear(dim, dim)
+        self.fc1 = nn.Linear(HIDDEN_DIM, HIDDEN_DIM)
+        self.fc2 = nn.Linear(HIDDEN_DIM, HIDDEN_DIM)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # The internal non-linear transformation
-        out = F.relu(self.fc1(x))
+        out = F.leaky_relu(self.fc1(x))
         out = self.fc2(out)
 
-        # The skip connection adds the original input back IN FRONT of the final ReLU
-        return F.relu(out + x)
+        # The skip connection adds the original input back IN FRONT of the final activation
+        return F.leaky_relu(out + x)
 
 
 class DeepCFRNet(nn.Module):
     """
     Shared architecture for both the advantage and strategy networks.
 
-        Input (INPUT_DIM) → Linear(hidden_dim) → ReLU
-                          → ResidualBlock × num_res_blocks
-                          → Linear(hidden_dim → num_actions)
+        Input (INPUT_DIM) → Linear(HIDDEN_DIM) → LeakyReLU
+                          → ResidualBlock × NUM_RES_BLOCKS
+                          → Linear(HIDDEN_DIM → NUM_ACTIONS)
 
     Street buckets are passed as integer indices (N, 3) — columns are flop,
-    turn, river — and embedded into embed_dim-dimensional vectors before
+    turn, river — and embedded into EMBED_DIM-dimensional vectors before
     concatenation with the continuous features.  Each street has its own
     embedding table so the flop table can be smaller (2049 vs 8193 entries).
     Index 0 is treated as a padding token (all-zeros, not trained) in each
     table, representing an unreached street.
-
-    All parameters default to the current training configuration so that
-    existing checkpoints load without arguments.  To load a checkpoint with a
-    different architecture, pass the detected hyperparameters or use the
-    standalone `load_net_auto` helper in match_runner.py.
-
-    Residual blocks are registered as `res_block1`, `res_block2`, … so that
-    checkpoints saved under the original fixed-four-block layout remain
-    compatible regardless of the `num_res_blocks` setting.
     """
 
-    def __init__(
-        self,
-        embed_dim:      int = EMBED_DIM,
-        hidden_dim:     int = 512,
-        num_res_blocks: int = 4,
-        flop_buckets:   int = FLOP_BUCKETS,
-        turn_buckets:   int = TURN_BUCKETS,
-        river_buckets:  int = RIVER_BUCKETS,
-        num_actions:    int = NUM_ACTIONS,
-    ):
+    def __init__(self):
         super().__init__()
-        input_dim = CONT_DIM + NUM_STREETS * embed_dim
-        self.flop_embed  = nn.Embedding(flop_buckets,  embed_dim, padding_idx=0)
-        self.turn_embed  = nn.Embedding(turn_buckets,  embed_dim, padding_idx=0)
-        self.river_embed = nn.Embedding(river_buckets, embed_dim, padding_idx=0)
-        self.linear1 = nn.Linear(input_dim, hidden_dim)
-        for i in range(1, num_res_blocks + 1):
-            setattr(self, f'res_block{i}', ResidualBlock(hidden_dim))
-        self.output = nn.Linear(hidden_dim, num_actions)
-        self._num_res_blocks = num_res_blocks
+        self.flop_embed  = nn.Embedding(FLOP_BUCKETS,  EMBED_DIM, padding_idx=0)
+        self.turn_embed  = nn.Embedding(TURN_BUCKETS,  EMBED_DIM, padding_idx=0)
+        self.river_embed = nn.Embedding(RIVER_BUCKETS, EMBED_DIM, padding_idx=0)
+        self.linear1 = nn.Linear(INPUT_DIM, HIDDEN_DIM)
+        for i in range(1, NUM_RES_BLOCKS + 1):
+            setattr(self, f'res_block{i}', ResidualBlock())
+        self.output = nn.Linear(HIDDEN_DIM, NUM_ACTIONS)
 
     def forward(self, x_cont: torch.Tensor, buckets: torch.Tensor) -> torch.Tensor:
         """
         x_cont  : (N, CONT_DIM)   float32
         buckets : (N, NUM_STREETS) int64   — columns: [flop, turn, river]
-        returns : (N, num_actions) float32
+        returns : (N, NUM_ACTIONS) float32
         """
         e_flop  = self.flop_embed (buckets[:, 0])
         e_turn  = self.turn_embed (buckets[:, 1])
         e_river = self.river_embed(buckets[:, 2])
         x = torch.cat([x_cont, e_flop, e_turn, e_river], dim=1)
 
-        x = F.relu(self.linear1(x))
-        for i in range(1, self._num_res_blocks + 1):
+        x = F.leaky_relu(self.linear1(x))
+        for i in range(1, NUM_RES_BLOCKS + 1):
             x = getattr(self, f'res_block{i}')(x)
         return self.output(x)
 
@@ -300,11 +284,16 @@ def train_advantage(
     targets: np.ndarray,       # (N, NUM_ACTIONS)   float32 — true regrets
     batch_size: int = 4096,
     epochs: int = 1,
+    max_steps: int | None = None,
     device: torch.device = torch.device('cuda'),
 ) -> list[float]:
     """
     Train the advantage network with MSE loss on the regret targets.
-    Returns the mean loss over the final epoch.
+    Returns a list of per-epoch mean losses (epoch mode) or a single-element
+    list of mean loss over all steps (max_steps mode).
+
+    max_steps: if given, train exactly this many mini-batches, reshuffling
+    the dataset whenever it is exhausted.  Ignores the epochs argument.
 
     Samples are shuffled via torch.randperm each epoch and sliced directly
     from zero-copy numpy views into pre-allocated pinned staging buffers,
@@ -320,30 +309,48 @@ def train_advantage(
     tgt_buf = torch.empty(batch_size, targets.shape[1],    dtype=torch.float32, pin_memory=True)
 
     net.train()
-    losses = []
 
+    def _step(idx):
+        bs = len(idx)
+        raw_buf[:bs].copy_(raw_pt[idx])
+        tgt_buf[:bs].copy_(tgt_pt[idx])
+        raw_b = raw_buf[:bs].to(device, non_blocking=True)
+        t_b   = tgt_buf[:bs].to(device, non_blocking=True)
+        optimizer.zero_grad()
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+            xc, b  = decode_batch_gpu(raw_b)
+            # Illegal actions are stored as NaN; exclude them from the loss so
+            # the network does not learn a spurious target of 0 for those slots.
+            mask   = ~torch.isnan(t_b)
+            sq_err = ((net(xc, b) - t_b.nan_to_num(0.0)) * mask) ** 2
+            loss   = sq_err.sum(dim=1).div(mask.sum(dim=1).clamp(min=1)).mean()
+        loss.backward()
+        optimizer.step()
+        return loss.detach()
+
+    if max_steps is not None:
+        total      = torch.zeros(1, device=device)
+        steps_done = 0
+        perm       = torch.randperm(N)
+        pos        = 0
+        while steps_done < max_steps:
+            if pos >= N:
+                perm = torch.randperm(N)
+                pos  = 0
+            idx    = perm[pos:pos + batch_size]
+            pos   += batch_size
+            total += _step(idx)
+            steps_done += 1
+        return [(total / steps_done).item()]
+
+    losses = []
     for _ in range(epochs):
         perm      = torch.randperm(N)
         total     = torch.zeros(1, device=device)
         n_batches = 0
         for start in range(0, N, batch_size):
             idx = perm[start:start + batch_size]
-            bs  = len(idx)
-            raw_buf[:bs].copy_(raw_pt[idx])
-            tgt_buf[:bs].copy_(tgt_pt[idx])
-            raw_b = raw_buf[:bs].to(device, non_blocking=True)
-            t_b   = tgt_buf[:bs].to(device, non_blocking=True)
-            optimizer.zero_grad()
-            with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
-                xc, b  = decode_batch_gpu(raw_b)
-                # Illegal actions are stored as NaN; exclude them from the loss so
-                # the network does not learn a spurious target of 0 for those slots.
-                mask   = ~torch.isnan(t_b)
-                sq_err = ((net(xc, b) - t_b.nan_to_num(0.0)) * mask) ** 2
-                loss   = sq_err.sum(dim=1).div(mask.sum(dim=1).clamp(min=1)).mean()
-            loss.backward()
-            optimizer.step()
-            total += loss.detach()
+            total += _step(idx)
             n_batches += 1
         losses.append((total / n_batches).item())
 
@@ -360,6 +367,8 @@ def train_policy(
     epochs: int = 1,
     device: torch.device = torch.device('cuda'),
     epoch_callback=None,       # called as epoch_callback(ep, loss, secs) after each epoch
+    step_callback=None,        # called as step_callback(global_step, loss) every step_callback_freq steps
+    step_callback_freq: int = 100,
 ) -> list[float]:
     """
     Train the strategy network with iteration-weighted cross-entropy loss.
@@ -387,7 +396,8 @@ def train_policy(
     wt_buf  = torch.empty(batch_size,                      dtype=torch.float32, pin_memory=True)
 
     net.train()
-    losses = []
+    losses        = []
+    global_step   = 0
 
     for ep in range(1, epochs + 1):
         ep_t0     = _time.perf_counter()
@@ -415,8 +425,11 @@ def train_policy(
                 loss       = (wt_b * per_sample).mean()
             loss.backward()
             optimizer.step()
-            total += loss.detach()
-            n_batches += 1
+            total      += loss.detach()
+            n_batches  += 1
+            global_step += 1
+            if step_callback is not None and global_step % step_callback_freq == 0:
+                step_callback(global_step, loss.item())
         mean_loss = (total / n_batches).item()
         losses.append(mean_loss)
         if epoch_callback is not None:

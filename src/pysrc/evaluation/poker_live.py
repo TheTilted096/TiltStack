@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.join(_EVAL_DIR, '..', 'deepcfr'))
 import deepcfr
 from tilt_agents import (
     TiltStack_DeepCFR,
+    load_net_auto,
     _abstract_to_osp,
     _CHECK, _CALL, _BET50, _BET100, _ALLIN,
 )
@@ -106,13 +107,7 @@ class PokerLive:
         self.device = torch.device(device)
 
         # Load strategy network
-        ckpt = torch.load(net_path, map_location=device, weights_only=True)
-        net  = DeepCFRNet()
-        sd = ckpt['net']
-        if any(k.startswith("_orig_mod.") for k in sd):
-            sd = {k.removeprefix("_orig_mod."): v for k, v in sd.items()}
-        net.load_state_dict(sd)
-        self.model = net.to(self.device).eval()
+        self.model = load_net_auto(net_path, self.device)
 
         # OpenSpiel game (stateless, shared)
         self.osp_game = pyspiel.load_game(GAME_STRING)
@@ -648,7 +643,7 @@ def main():
         help='Path to strategy network checkpoint (policy*.pt)',
     )
     parser.add_argument(
-        '--clusters', default=None,
+        '--clusters', default='clusters',
         help='Path to clusters/ directory (required for EHS and bucket lookups)',
     )
     parser.add_argument(
@@ -668,8 +663,10 @@ def main():
     if args.net is None:
         parser.error('--net is required unless --test-deal is set')
 
-    if args.clusters:
-        deepcfr.load_tables(args.clusters)
+    if not os.path.isdir(args.clusters):
+        parser.error(f'clusters directory not found: {args.clusters!r}  '
+                     f'(pass --clusters <path> or run from the src/ directory)')
+    deepcfr.load_tables(args.clusters)
 
     game = PokerLive(args.net, args.clusters, args.device)
     curses.wrapper(game.run)

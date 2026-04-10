@@ -69,6 +69,21 @@ OSP_MC_SCALE   = STARTING_STACK // OSP_STACK   # = 20
 
 
 # ---------------------------------------------------------------------------
+# Checkpoint loading
+# ---------------------------------------------------------------------------
+
+def load_net_auto(path: str, device) -> DeepCFRNet:
+    """Load a DeepCFRNet checkpoint."""
+    ckpt = torch.load(path, map_location=device, weights_only=True)
+    sd   = ckpt['net']
+    if any(k.startswith('_orig_mod.') for k in sd):
+        sd = {k.removeprefix('_orig_mod.'): v for k, v in sd.items()}
+    net = DeepCFRNet()
+    net.load_state_dict(sd)
+    return net.to(device).eval()
+
+
+# ---------------------------------------------------------------------------
 # History helpers
 # ---------------------------------------------------------------------------
 

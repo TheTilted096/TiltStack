@@ -18,14 +18,13 @@ Player convention (same as NLHE_Trainer)
   hero=True   →  player 1  →  big blind    →  acts when isButton=False
 """
 
-import os
-import math
 import time
 import argparse
 from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+from tb_launch import launch_tb
 
 import deepcfr
 from network_training import (
@@ -194,6 +193,17 @@ def main():
     print(f"[{_ts()}]  device={device}  threads={args.threads}"
           f"  samples/iter={samples_str}  iters={args.iters}\n")
 
+    # ---- TensorBoard --------------------------------------------------------
+    # Launched before CUDA init and torch.compile so the stderr suppress
+    # window covers both phases, where gRPC triggers its startup noise.
+    seed = 0xdeadbeefcafe1234 if args.seed is None else args.seed
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    run_name = time.strftime('%m%d%y_%H%M%S')
+    log_dir  = Path(__file__).parent.parent.parent / "runs" / run_name
+    log_dir.mkdir(parents=True, exist_ok=True)
+    writer   = launch_tb(log_dir)
+    print(f"[{_ts()}]  TensorBoard → http://127.0.0.1:6006/?darkMode=false&runFilter={run_name}#timeseries\n")
+
     # ---- One-time setup -----------------------------------------------------
     deepcfr.load_tables("clusters")
     verify_layout(deepcfr.INFOSET_BYTES)
@@ -214,9 +224,6 @@ def main():
         for _net in (*adv_nets, policy_net):
             _net(_dummy_xc, _dummy_b)
     print(f"[{_ts()}]  Compiled in {time.perf_counter() - _t_compile:.1f}s\n")
-
-    seed = 0xdeadbeefcafe1234 if args.seed is None else args.seed
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     adv_res = [Reservoir(RESERVOIR_CAPACITY, args.threads, deepcfr.INFOSET_BYTES)
                for _ in range(2)]
@@ -262,23 +269,23 @@ def main():
                 adv_nets[player]._orig_mod.apply(
                     lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
                 adv_opts[player] = torch.optim.Adam(adv_nets[player].parameters(), lr=args.lr)
-                batches_per_epoch = max(1, math.ceil(n_adv / args.batch))
-                epochs = max(1, math.ceil(args.adv_step / batches_per_epoch))
                 t0 = time.perf_counter()
                 losses = train_advantage(
                     adv_nets[player], adv_opts[player],
                     adv_res[player].inputs [:n_adv],
                     adv_res[player].targets[:n_adv],
                     batch_size=args.batch,
-                    epochs=epochs,
+                    max_steps=args.adv_step,
                     device=device,
                 )
                 train_secs = time.perf_counter() - t0
+                samples_seen = args.adv_step * args.batch
+                writer.add_scalar(f"adv/p{player}", losses[-1], global_step=t)
                 print(f"\n  [P{player} advantage]  samples={_fmt(n_adv)}"
-                      f"  ·  steps={args.adv_step}  epochs={epochs}"
+                      f"  ·  steps={args.adv_step}"
                       f"  ·  loss={losses[-1]:.5f}"
                       f"  ·  {train_secs:.1f}s"
-                      f"  ·  {_rate(n_adv * epochs, train_secs)} samples/s")
+                      f"  ·  {_rate(samples_seen, train_secs)} samples/s")
 
         # -- Iteration summary ------------------------------------------------
         iter_elapsed = time.perf_counter() - iter_start
@@ -290,6 +297,7 @@ def main():
         print(f"\n  iter {iter_elapsed:.1f}s{eta_str}\n")
 
     # ---- Final advantage networks -------------------------------------------
+    writer.close()
     paths = save_final_advantages(ckpt_dir, args.iters, adv_nets)
     print(f"[{_ts()}] ==> Done.  Final advantage networks → {', '.join(p.name for p in paths)}")
 
