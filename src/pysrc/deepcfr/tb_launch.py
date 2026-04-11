@@ -6,7 +6,6 @@ TensorBoard is launched as a subprocess with stdout/stderr redirected to
 terminal.  The subprocess is terminated automatically when the parent exits.
 """
 
-import atexit
 import sys
 import subprocess
 from pathlib import Path
@@ -14,18 +13,19 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 def launch_tb(log_dir: Path, port: int = 6006,
-              reload_interval: int = 10) -> SummaryWriter:
+              reload_interval: int = 20) -> SummaryWriter:
     """
     Launch TensorBoard pointed at log_dir.parent and return a SummaryWriter
-    for log_dir.  The caller is responsible for calling writer.close().
+    for log_dir.  The caller is responsible for calling writer.close() and
+    for registering any cleanup handlers.
     """
-    proc = subprocess.Popen(
+    subprocess.Popen(
         [Path(sys.executable).parent / "tensorboard",
          "--logdir",          str(log_dir.parent),
          "--port",            str(port),
          "--reload_interval", str(reload_interval)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
-    atexit.register(proc.terminate)
     return SummaryWriter(log_dir=str(log_dir))
