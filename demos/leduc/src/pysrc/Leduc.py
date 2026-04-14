@@ -34,7 +34,7 @@ class Leduc:
                             continue
                         weight = 4.0 if (p0 == p1 or p0 == c or p1 == c) else 8.0
                         cards = [Rank(p0), Rank(p1), Rank(c)]
-                        self.solver.cfr(cards, p0 * 8, [weight, weight], self.iteration, 0)
+                        self.solver.cfr(cards, p0 * 8, [weight, weight], self.iteration, 0, True)
 
             # Flush Player 0 regrets (apply deltas and floor)
             self.solver.flush_regrets()
@@ -47,7 +47,7 @@ class Leduc:
                             continue
                         weight = 4.0 if (p0 == p1 or p0 == c or p1 == c) else 8.0
                         cards = [Rank(p0), Rank(p1), Rank(c)]
-                        self.solver.cfr(cards, p0 * 8, [weight, weight], self.iteration, 1)
+                        self.solver.cfr(cards, p0 * 8, [weight, weight], self.iteration, 1, False)
 
             # Flush Player 1 regrets (apply deltas and floor)
             self.solver.flush_regrets()

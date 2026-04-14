@@ -115,7 +115,7 @@ class Kuhn:
         plt.tight_layout()
         plt.show()
 
-    def train(self) -> None: # iterate over every deal in kuhn poker
+    def train(self) -> None:
         score = 0.0
         for i in range(3):
             for j in range(3):
@@ -127,39 +127,40 @@ class Kuhn:
     def cfr(self, cards: list[Card],
             history: str, prob: list[float]) -> float:
         game_len = len(history)
-        stm = game_len % 2 # side to move
+        stm = game_len % 2
 
         if game_len > 1:
             # there are three terminal states
 
-            showdown_val = card_rank[cards[stm]] > card_rank[cards[1 - stm]] # who wins the showdown
+            showdown_val = card_rank[cards[stm]] > card_rank[cards[1 - stm]]
 
-            if history[-1] == Action.CHECK.value: # game ends in a check or fold
-                if history[-2] == Action.CHECK.value: # there was a check before that, double check
+            if history[-1] == Action.CHECK.value:
+                if history[-2] == Action.CHECK.value:
                     return showdown_val * 2 - 1 # return the payout
 
-                return 1 # otherwise, the opponent folded, so this side gets a point
+                return 1
 
-            if history[-2:] == Action.BET.value + Action.BET.value: # game ends in two bets
-                return showdown_val * 4 - 2 # return showdown winner but with higher stakes
+            if history[-2:] == Action.BET.value + Action.BET.value:
+                return showdown_val * 4 - 2
 
-        node_key = cards[stm].value + history # get the key for the next node
-        if node_key not in self.nodes: # if it's not in the dictionary, we must initialize it
+        node_key = cards[stm].value + history
+        if node_key not in self.nodes:
             self.nodes[node_key] = Node()
-        node_strat = self.nodes[node_key].get_current_strategy(prob[stm]) # compute a temporary strategy internally
+        node_strat = self.nodes[node_key].get_current_strategy(prob[stm])
 
-        node_util = 0.0 # EV of this node
-        action_utils = [0.0, 0.0] # EV of each child node
+        node_util = 0.0
+        action_utils = [0.0, 0.0]
         for i in range(2):
-            next_hist = history + actions[i].value # next history
-            next_prob = prob.copy() # copy the 'allowance' probabilities
-            next_prob[stm] *= node_strat[i] # adjust our 'allowance' probability
+            next_hist = history + actions[i].value
+            next_prob = prob.copy()
+            next_prob[stm] *= node_strat[i]
 
-            action_utils[i] = -self.cfr(cards, next_hist, next_prob) # compute utility of child node
 
-            node_util += node_strat[i] * action_utils[i] # weight and add to EV of this node
+            action_utils[i] = -self.cfr(cards, next_hist, next_prob)
 
-        for j in range(2): # regret updating, the core mechanism
+            node_util += node_strat[i] * action_utils[i]
+
+        for j in range(2):
             regret = action_utils[j] - node_util
             self.nodes[node_key].regrets[j] += regret * prob[1 - stm]
 
