@@ -1,9 +1,14 @@
-# Leduc Hold'em CFR+ Solver Dependencies
-# Install with: pip install -r requirements.txt
+# C++ extension build deps
+pybind11>=2.10.0
+setuptools>=42.0.0
 
-# Build & bindings
-pybind11>=2.10.0       # C++/Python bindings
-setuptools>=42.0.0     # C++ extension build
+# Core
+numpy>=1.21.0
+matplotlib>=3.5.0
 
-# Visualization
-matplotlib>=3.5.0      # Convergence plots
+# RLCard environment & CFR agents
+rlcard>=1.0.5
+
+# Streamlit demo (app.py)
+streamlit>=1.30.0
+plotly>=5.18.0

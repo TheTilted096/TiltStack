@@ -1,12 +1,18 @@
+# macOS metadata
+.DS_Store
+**/.DS_Store
+
 __pycache__/
+*.pyc
 
 # PyBind11 build artifacts
 build/
+*.pyd
+*.so
+*.o
 checkpoints/
 br_checkpoints/
 saves/
-*.pyd
-*.so
 
 # IDE configuration (machine-specific paths)
 .vscode/
