@@ -1,1 +1,18 @@
 __pycache__/
+
+# PyBind11 build artifacts
+build/
+checkpoints/
+br_checkpoints/
+saves/
+*.pyd
+*.so
+
+# IDE configuration (machine-specific paths)
+.vscode/
+
+# Solver output
+*.npy
+*.bin
+
+src/*.txt
