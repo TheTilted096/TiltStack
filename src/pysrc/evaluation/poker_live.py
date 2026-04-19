@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.join(_EVAL_DIR, '..', 'deepcfr'))
 import deepcfr
 from tilt_agents import (
     TiltStack_DeepCFR,
+    load_net_auto,
     _abstract_to_osp,
     _CHECK, _CALL, _BET50, _BET100, _ALLIN,
 )
@@ -106,13 +107,7 @@ class PokerLive:
         self.device = torch.device(device)
 
         # Load strategy network
-        ckpt = torch.load(net_path, map_location=device, weights_only=True)
-        net  = DeepCFRNet()
-        sd = ckpt['net']
-        if any(k.startswith("_orig_mod.") for k in sd):
-            sd = {k.removeprefix("_orig_mod."): v for k, v in sd.items()}
-        net.load_state_dict(sd)
-        self.model = net.to(self.device).eval()
+        self.model = load_net_auto(net_path, self.device)
 
         # OpenSpiel game (stateless, shared)
         self.osp_game = pyspiel.load_game(GAME_STRING)
@@ -142,7 +137,7 @@ class PokerLive:
         self.cheat_mode          = False
         self.last_bot_probs      = None   # np.ndarray (NUM_ACTIONS,) or None
         self.last_bot_abstract   = -1     # abstract action index bot chose last
-        self.last_bot_raw_info   = None   # raw uint8 InfoSet buffer (1, 160) or None
+        self.last_bot_raw_info   = None   # raw uint8 InfoSet buffer (1, 168) or None
 
     # ------------------------------------------------------------------
     # Hand lifecycle
@@ -349,11 +344,19 @@ class PokerLive:
         river_str = f'[{_mask_to_cards(int(rec["river"]))}]'
         cards_str = f'{hole_str} {flop_str} {turn_str} {river_str}'
 
-        bh = rec['bet_hist']   # shape (4, 6), normalised fractions
+        bh      = rec['bet_hist']    # shape (4, 6), normalised fractions
+        bhmask  = int(rec['bet_hist_mask'])
         bh_lines = []
+        MAX_ACTIONS = 6
         for rnd, rname in enumerate(['PF  ', 'Flop', 'Turn', 'Riv ']):
-            vals = [f'{v:.3f}' for v in bh[rnd]]
-            bh_lines.append(f'  │    {rname}  ' + '  '.join(vals))
+            slots = []
+            for slot in range(MAX_ACTIONS):
+                v = bh[rnd][slot]
+                if bhmask & (1 << (rnd * MAX_ACTIONS + slot)):
+                    slots.append(f'[{v:.3f}]')   # used: bracketed
+                else:
+                    slots.append(f' {v:.3f} ')   # unused: same width, no brackets
+            bh_lines.append(f'  │    {rname}  ' + ' '.join(slots))
 
         return [
             f'  │  Street: {street:<7}  [{se_str}]  Pos: {pos}',
@@ -648,7 +651,7 @@ def main():
         help='Path to strategy network checkpoint (policy*.pt)',
     )
     parser.add_argument(
-        '--clusters', default=None,
+        '--clusters', default='clusters',
         help='Path to clusters/ directory (required for EHS and bucket lookups)',
     )
     parser.add_argument(
@@ -668,8 +671,10 @@ def main():
     if args.net is None:
         parser.error('--net is required unless --test-deal is set')
 
-    if args.clusters:
-        deepcfr.load_tables(args.clusters)
+    if not os.path.isdir(args.clusters):
+        parser.error(f'clusters directory not found: {args.clusters!r}  '
+                     f'(pass --clusters <path> or run from the src/ directory)')
+    deepcfr.load_tables(args.clusters)
 
     game = PokerLive(args.net, args.clusters, args.device)
     curses.wrapper(game.run)

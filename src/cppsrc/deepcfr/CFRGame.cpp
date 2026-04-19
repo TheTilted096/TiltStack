@@ -12,7 +12,8 @@ void CFRGame::initState(int ss1, int ss2, bool h) {
     currentRound = Round::PREFLOP;
 
     std::fill(&betHist[0][0], &betHist[0][0] + sizeof(betHist) / sizeof(float),
-              -1.0f);
+              0.0f);
+    betHistMask = 0;
 
     initialStacks[0] = ss1;
     initialStacks[1] = ss2;
@@ -27,6 +28,7 @@ void CFRGame::initState(int ss1, int ss2, bool h) {
 
 void CFRGame::indexCards(const Card deck[9]) {
     // deck[0..1] = p0 hole, deck[2..3] = p1 hole, deck[4..8] = board
+    std::memcpy(rawDeck, deck, 9 * sizeof(Card));
     for (int p = 0; p < 2; p++) {
         uint8_t cards[7] = {deck[p * 2], deck[p * 2 + 1], deck[4], deck[5],
                             deck[6],     deck[7],         deck[8]};
@@ -143,6 +145,7 @@ void CFRGame::makeMove(const Action &a) {
 
     betHist[roundNum][numActs] =
         static_cast<float>(now.toCall) / (last.pot + last.toCall);
+    betHistMask ^= (1u << (roundNum * MAX_ACTIONS + numActs));
 
     currentRound = static_cast<Round>(roundNum + streetEnded);
 
@@ -187,6 +190,7 @@ void CFRGame::makeBet(int amount_milli) {
 
     betHist[roundNum][numActs] =
         static_cast<float>(now.toCall) / (last.pot + last.toCall);
+    betHistMask |= (1u << (roundNum * MAX_ACTIONS + numActs));
 
     currentRound = static_cast<Round>(roundNum + streetEnded);
     now.stm = streetEnded or !last.stm;
@@ -207,7 +211,8 @@ void CFRGame::unmakeMove() {
     }
 
     actionCount[roundNum]--;
-    betHist[roundNum][actionCount[roundNum]] = -1.0f;
+    betHist[roundNum][actionCount[roundNum]] = 0.0f;
+    betHistMask ^= (1u << (roundNum * MAX_ACTIONS + actionCount[roundNum]));
 }
 
 float CFRGame::payout() {
@@ -330,16 +335,16 @@ InfoSet CFRGame::getInfo() {
     info.currentEHS = streetEHS[roundNum][stm];
 
     std::memcpy(info.betHist, betHist, sizeof(betHist));
+    info.betHistMask = betHistMask;
 
-    uint8_t canonical[7] = {};
-    hand_unindex(&g_indexer, roundNum, streetIDs[roundNum][stm], canonical);
-
-    info.hole = (1ULL << canonical[0]) | (1ULL << canonical[1]);
-    info.flop = ((1ULL << canonical[2]) | (1ULL << canonical[3]) |
-                 (1ULL << canonical[4])) *
+    // stm==0 → p0 hole cards at rawDeck[0,1]; stm==1 → p1 at rawDeck[2,3]
+    int holeBase = stm * 2;
+    info.hole = (1ULL << rawDeck[holeBase]) | (1ULL << rawDeck[holeBase + 1]);
+    info.flop = ((1ULL << rawDeck[4]) | (1ULL << rawDeck[5]) |
+                 (1ULL << rawDeck[6])) *
                 (currentRound >= Round::FLOP);
-    info.turn = (1ULL << canonical[5]) * (currentRound >= Round::TURN);
-    info.river = (1ULL << canonical[6]) * (currentRound >= Round::RIVER);
+    info.turn = (1ULL << rawDeck[7]) * (currentRound >= Round::TURN);
+    info.river = (1ULL << rawDeck[8]) * (currentRound >= Round::RIVER);
 
     // One-hot encode current round
     info.streetEmbed.fill(false);

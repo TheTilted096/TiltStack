@@ -4,7 +4,7 @@ NLHE_Trainer.py — DeepCFR main training loop for TiltStack.
 Networks
 --------
   adv_net[0]  advantage network for player 0 (small blind)
-  adv_net[1]  advantage network for player 1 (big blind / button)
+  adv_net[1]  advantage network for player 1 (big blind)
   strat_net   shared strategy network
 
 Training loop (alternating traversal)
@@ -28,12 +28,16 @@ Player convention
 """
 
 import os
-import math
+import sys
 import time
+import signal
+import atexit
 import argparse
+import subprocess
 from pathlib import Path
 import numpy as np
 import torch
+from tb_launch import launch_tb
 
 import deepcfr
 from network_training import (
@@ -175,6 +179,19 @@ def main():
     print(f"[{_ts()}]  device={device}  threads={args.threads}"
           f"  samples/iter={samples_str}  iters={args.iters}\n")
 
+    # ---- TensorBoard --------------------------------------------------------
+    # Launched before CUDA init and torch.compile so the stderr suppress
+    # window covers both phases, where gRPC triggers its startup noise.
+    seed = 0xdeadbeefcafe1234 if args.seed is None else args.seed
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    run_name = time.strftime('%m%d%y_%H%M%S')
+    log_dir  = Path(__file__).parent.parent.parent / "runs" / run_name
+    log_dir.mkdir(parents=True, exist_ok=True)
+    writer   = launch_tb(log_dir)
+    atexit.register(lambda: subprocess.run(["pkill", "-f", "tensorboard"], capture_output=True))
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    print(f"[{_ts()}]  TensorBoard → http://127.0.0.1:6006/?darkMode=false&runFilter={run_name}#timeseries\n")
+
     # ---- One-time setup -----------------------------------------------------
     deepcfr.load_tables("clusters")
     verify_layout(deepcfr.INFOSET_BYTES)
@@ -195,9 +212,6 @@ def main():
             _net(_dummy_xc, _dummy_b)
     print(f"[{_ts()}]  Compiled in {time.perf_counter() - _t_compile:.1f}s\n")
 
-    seed = 0xdeadbeefcafe1234 if args.seed is None else args.seed
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-
     adv_res   = [Reservoir(RESERVOIR_CAPACITY, args.threads, deepcfr.INFOSET_BYTES)
                  for _ in range(2)]
     strat_res =  Reservoir(RESERVOIR_CAPACITY, args.threads, deepcfr.INFOSET_BYTES,
@@ -208,81 +222,95 @@ def main():
 
     # ---- Training loop ------------------------------------------------------
     iter_times = []
+    last_t      = 0      # last fully completed CFR iteration
+    _interrupted = False
 
-    for t in range(1, args.iters + 1):
-        print(f"[{_ts()}] ==> Iteration {t} / {args.iters}")
-        iter_start = time.perf_counter()
+    try:
+        for t in range(1, args.iters + 1):
+            print(f"[{_ts()}] ==> Iteration {t} / {args.iters}")
+            iter_start = time.perf_counter()
 
-        for hero in [False, True]:
-            player = int(hero)
+            for hero in [False, True]:
+                player = int(hero)
 
-            # -- Rollout ------------------------------------------------------
-            adv_before = adv_res[player].n_seen
-            pol_before = strat_res.n_seen
+                # -- Rollout --------------------------------------------------
+                adv_before = adv_res[player].n_seen
+                collect_policy = t > 50
+                pol_before = strat_res.n_seen if collect_policy else 0
 
-            t0 = time.perf_counter()
-            orch.start_iteration(hero, t, args.samples)
-            run_inference_loop(orch, adv_nets, device)
-            orch.wait_iteration()
-            rollout_secs = time.perf_counter() - t0
-
-            rollouts = sum(s.rollout_count() for s in orch.schedulers)
-            orch.clear_buffers()
-
-            adv_new   = adv_res[player].n_seen - adv_before
-            pol_new   = strat_res.n_seen - pol_before
-            adv_size  = adv_res[player].size
-            pol_size  = strat_res.size
-            cap_str   = _fmt(RESERVOIR_CAPACITY)
-
-            print(f"\n  [P{player} rollout]  {rollout_secs:.1f}s"
-                  f"  ·  rollouts={_fmt(rollouts)}"
-                  f"  ·  {_rate(adv_new + pol_new, rollout_secs)} infosets/s")
-            print(f"    advantage  +{_fmt(adv_new):<12}"
-                  f"  reservoir  {_fmt(adv_size):>12} / {cap_str}")
-            print(f"    policy     +{_fmt(pol_new):<12}"
-                  f"  reservoir  {_fmt(pol_size):>12} / {cap_str}")
-
-            # -- Advantage training -------------------------------------------
-            n_adv = adv_res[player].size
-            if n_adv > 0:
-                adv_nets[player]._orig_mod.apply(
-                    lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
-                adv_opts[player] = torch.optim.Adam(adv_nets[player].parameters(), lr=args.lr)
-                batches_per_epoch = max(1, math.ceil(n_adv / args.batch))
-                epochs = max(1, math.ceil(args.adv_step / batches_per_epoch))
                 t0 = time.perf_counter()
-                losses = train_advantage(
-                    adv_nets[player], adv_opts[player],
-                    adv_res[player].inputs [:n_adv],
-                    adv_res[player].targets[:n_adv],
-                    batch_size=args.batch,
-                    epochs=epochs,
-                    device=device,
-                )
-                train_secs = time.perf_counter() - t0
-                print(f"\n  [P{player} advantage]  samples={_fmt(n_adv)}"
-                      f"  ·  steps={args.adv_step}  epochs={epochs}"
-                      f"  ·  loss={losses[-1]:.5f}"
-                      f"  ·  {train_secs:.1f}s"
-                      f"  ·  {_rate(n_adv * epochs, train_secs)} samples/s")
+                orch.start_iteration(hero, t, args.samples)
+                run_inference_loop(orch, adv_nets, device)
+                orch.wait_iteration()
+                rollout_secs = time.perf_counter() - t0
 
-        # -- Iteration summary ------------------------------------------------
-        iter_elapsed = time.perf_counter() - iter_start
-        iter_times.append(iter_elapsed)
-        remaining = args.iters - t
-        eta_str = (f"  ETA {_eta(sum(iter_times)/len(iter_times) * remaining)}"
-                   f"  ({remaining} remaining)" if remaining > 0 else "  (final iteration)")
-        print(f"\n  iter {iter_elapsed:.1f}s{eta_str}\n")
+                rollouts = sum(s.rollout_count() for s in orch.schedulers)
+                orch.clear_buffers()
+
+                adv_new  = adv_res[player].n_seen - adv_before
+                adv_size = adv_res[player].size
+                cap_str  = _fmt(RESERVOIR_CAPACITY)
+
+                print(f"\n  [P{player} rollout]  {rollout_secs:.1f}s"
+                      f"  ·  rollouts={_fmt(rollouts)}"
+                      f"  ·  {_rate(adv_new, rollout_secs)} infosets/s")
+                print(f"    advantage  +{_fmt(adv_new):<12}"
+                      f"  reservoir  {_fmt(adv_size):>12} / {cap_str}")
+                if collect_policy:
+                    pol_new  = strat_res.n_seen - pol_before
+                    pol_size = strat_res.size
+                    print(f"    policy     +{_fmt(pol_new):<12}"
+                          f"  reservoir  {_fmt(pol_size):>12} / {cap_str}")
+
+                # -- Advantage training ---------------------------------------
+                n_adv = adv_res[player].size
+                if n_adv > 0:
+                    adv_nets[player]._orig_mod.apply(
+                        lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
+                    adv_opts[player] = torch.optim.Adam(adv_nets[player].parameters(), lr=args.lr)
+                    t0 = time.perf_counter()
+                    losses = train_advantage(
+                        adv_nets[player], adv_opts[player],
+                        adv_res[player].inputs [:n_adv],
+                        adv_res[player].targets[:n_adv],
+                        batch_size=args.batch,
+                        max_steps=args.adv_step,
+                        device=device,
+                    )
+                    train_secs = time.perf_counter() - t0
+                    samples_seen = args.adv_step * args.batch
+                    writer.add_scalar(f"adv/p{player}", losses[-1], global_step=t)
+                    print(f"\n  [P{player} advantage]  samples={_fmt(n_adv)}"
+                          f"  ·  steps={args.adv_step}"
+                          f"  ·  loss={losses[-1]:.5f}"
+                          f"  ·  {train_secs:.1f}s"
+                          f"  ·  {_rate(samples_seen, train_secs)} samples/s")
+
+            # -- Iteration summary --------------------------------------------
+            iter_elapsed = time.perf_counter() - iter_start
+            iter_times.append(iter_elapsed)
+            remaining = args.iters - t
+            eta_str = (f"  ETA {_eta(sum(iter_times)/len(iter_times) * remaining)}"
+                       f"  ({remaining} remaining)" if remaining > 0 else "  (final iteration)")
+            print(f"\n  iter {iter_elapsed:.1f}s{eta_str}\n")
+            last_t = t
+
+    except KeyboardInterrupt:
+        _interrupted = True
+        print(f"\n[{_ts()}]  Interrupted after {last_t} iterations — skipping to policy training ...")
+        writer.flush()
 
     # ---- Strategy network ---------------------------------------------------
-    strat_epochs = args.epochs
+    # A second Ctrl-C here propagates normally and exits without saving.
     n_pol = strat_res.size
+    if n_pol == 0:
+        print(f"[{_ts()}]  No policy samples collected — nothing to save.")
+        writer.close()
+        raise SystemExit(1)
+
+    strat_epochs = args.epochs
     print(f"[{_ts()}] ==> Strategy network\n"
           f"  samples={_fmt(n_pol)}  ·  {strat_epochs} epochs\n")
-
-    def _strat_epoch_cb(ep, loss, secs):
-        print(f"    ep {ep:2d} / {strat_epochs}   loss = {loss:.5f}  ·  {secs:.1f}s")
 
     t0 = time.perf_counter()
     train_policy(
@@ -293,13 +321,25 @@ def main():
         batch_size=args.batch,
         epochs=strat_epochs,
         device=device,
-        epoch_callback=_strat_epoch_cb,
+        epoch_callback=lambda ep, loss, secs:
+            print(f"    ep {ep:2d} / {strat_epochs}   loss = {loss:.5f}  ·  {secs:.1f}s"),
+        step_callback=lambda step, loss:
+            writer.add_scalar("policy/loss", loss, global_step=step),
+        step_callback_freq=500,
     )
     strat_secs = time.perf_counter() - t0
     print(f"\n  {strat_secs:.1f}s  ·  {_rate(n_pol * strat_epochs, strat_secs)} samples/s\n")
 
-    path = save_final_policy(ckpt_dir, args.iters, strat_net)
+    writer.close()
+    path = save_final_policy(ckpt_dir, last_t, strat_net)
     print(f"[{_ts()}] ==> Done.  Final policy → {path.split('/')[-1]}")
+
+    if _interrupted:
+        # C++ worker threads are stuck mid-rollout and will cause the
+        # interpreter to hang during shutdown. Force-exit after explicit
+        # TensorBoard cleanup (atexit won't run with os._exit).
+        subprocess.run(["pkill", "-f", "tensorboard"], capture_output=True)
+        os._exit(0)
 
 
 if __name__ == "__main__":

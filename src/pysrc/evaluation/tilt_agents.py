@@ -8,7 +8,7 @@ normalisation, and betting history — so the agents contain no parsing logic.
 Workflow inside step():
   1. _sync_game(state)  — walk state.history(), separate card deals from bets,
                           call game.begin_with_cards() then replay every bet
-  2. game.get_info()    — returns the 160-byte InfoSet buffer directly
+  2. game.get_info()    — returns the 168-byte InfoSet buffer directly
   3. decode_batch()     — convert to (x_cont, buckets) tensors
   4. network forward    — get action logits
   5. _select_action()   — mask to CFRGame-legal abstract actions, pick one,
@@ -66,6 +66,21 @@ _ALLIN  = 4
 STARTING_STACK = 40_000   # milli-chips (CFRGame constant)
 OSP_STACK      = 2_000    # chips (must match stack= in the game string)
 OSP_MC_SCALE   = STARTING_STACK // OSP_STACK   # = 20
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint loading
+# ---------------------------------------------------------------------------
+
+def load_net_auto(path: str, device) -> DeepCFRNet:
+    """Load a DeepCFRNet checkpoint."""
+    ckpt = torch.load(path, map_location=device, weights_only=True)
+    sd   = ckpt['net']
+    if any(k.startswith('_orig_mod.') for k in sd):
+        sd = {k.removeprefix('_orig_mod.'): v for k, v in sd.items()}
+    net = DeepCFRNet()
+    net.load_state_dict(sd)
+    return net.to(device).eval()
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +252,7 @@ class _CFRBotMixin:
         masked_logits : np.ndarray, shape (NUM_ACTIONS,), dtype float32
         legal_abstract : list[int]
         """
-        raw             = self.game.get_info()           # (1, 160) uint8
+        raw             = self.game.get_info()           # (1, 168) uint8
         x_cont, buckets = decode_batch(raw)
         with torch.no_grad():
             logits = model(x_cont.to(self.device), buckets.to(self.device))

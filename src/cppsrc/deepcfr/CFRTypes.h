@@ -44,6 +44,11 @@ struct InfoSet {
     float currentEHS;
     float betHist[NUM_ROUNDS][MAX_ACTIONS];
 
+    // 4-byte: bitmask marking used betHist slots.
+    // Bit (r * MAX_ACTIONS + a) is set when betHist[r][a] has been written.
+    // Only the bottom 24 LSBs are used (4 rounds × 6 slots).
+    uint32_t betHistMask;
+
     // 2-byte: street abstraction buckets (flop/turn/river)
     std::array<uint16_t, NUM_ROUNDS - 1> streetBucket;
 
@@ -51,6 +56,13 @@ struct InfoSet {
     std::array<bool, NUM_ROUNDS> streetEmbed;
     bool isButton; // true if stm == 0
 };
+
+static_assert(offsetof(InfoSet, betHist)     ==  52, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, betHistMask) == 148, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, streetBucket)== 152, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, streetEmbed) == 158, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, isButton)    == 162, "InfoSet layout changed");
+static_assert(sizeof(InfoSet)                == 168, "InfoSet layout changed");
 
 struct BoardState {
     int pot;

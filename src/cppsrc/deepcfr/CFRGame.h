@@ -31,6 +31,8 @@ class CFRGame {
     uint16_t streetBucket[NUM_ROUNDS][2];
     float streetEHS[NUM_ROUNDS][2];
     hand_index_t streetIDs[NUM_ROUNDS][2];
+    Card rawDeck[9]; // {p0h0, p0h1, p1h0, p1h1, f0, f1, f2, turn, river}
+    uint32_t betHistMask; // mirrors InfoSet::betHistMask; maintained by makeMove/makeBet/unmakeMove
 
     CFRGame();
     ~CFRGame() = default;

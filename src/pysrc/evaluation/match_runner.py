@@ -28,7 +28,7 @@ _EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_EVAL_DIR, '..', 'deepcfr'))
 
 import deepcfr
-from tilt_agents import TiltStack_DeepCFR
+from tilt_agents import TiltStack_DeepCFR, load_net_auto
 from network_training import DeepCFRNet, CONT_DIM, NUM_STREETS
 
 # ---------------------------------------------------------------------------
@@ -54,52 +54,6 @@ GAME_STRING = (
     "bettingAbstraction=fullgame"
     ")"
 )
-
-# ---------------------------------------------------------------------------
-# Architecture detection
-# ---------------------------------------------------------------------------
-
-def detect_arch(sd: dict) -> dict:
-    """
-    Infer DeepCFRNet constructor kwargs from a checkpoint state dict.
-
-    Reads weight tensor shapes only — no forward pass needed.  Works for
-    any checkpoint saved with the `res_blockN` naming convention.
-    """
-    if any(k.startswith('_orig_mod.') for k in sd):
-        sd = {k.removeprefix('_orig_mod.'): v for k, v in sd.items()}
-
-    embed_dim      = sd['flop_embed.weight'].shape[1]
-    hidden_dim     = sd['linear1.weight'].shape[0]
-    num_actions    = sd['output.weight'].shape[0]
-    flop_buckets   = sd['flop_embed.weight'].shape[0]
-    turn_buckets   = sd['turn_embed.weight'].shape[0]
-    river_buckets  = sd['river_embed.weight'].shape[0]
-    num_res_blocks = sum(
-        1 for k in sd if k.startswith('res_block') and k.endswith('.fc1.weight')
-    )
-    return dict(
-        embed_dim=embed_dim,
-        hidden_dim=hidden_dim,
-        num_res_blocks=num_res_blocks,
-        flop_buckets=flop_buckets,
-        turn_buckets=turn_buckets,
-        river_buckets=river_buckets,
-        num_actions=num_actions,
-    )
-
-
-def load_net_auto(path: str, device: str) -> DeepCFRNet:
-    """Load a DeepCFRNet checkpoint, auto-detecting its architecture."""
-    ckpt = torch.load(path, map_location=device, weights_only=True)
-    sd   = ckpt['net']
-    if any(k.startswith('_orig_mod.') for k in sd):
-        sd = {k.removeprefix('_orig_mod.'): v for k, v in sd.items()}
-    arch = detect_arch(sd)
-    net  = DeepCFRNet(**arch)
-    net.load_state_dict(sd)
-    return net.to(device).eval()
-
 
 # ---------------------------------------------------------------------------
 # Match loop
