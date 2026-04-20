@@ -12,17 +12,18 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
 # ── Paths ─────────────────────────────────────────────────────────────
-OUTPUT_DIR   = Path(__file__).parent.parent.parent / "clusters"
-LABELS_PATH     = OUTPUT_DIR / "river_labels.bin"
-CENTROIDS_PATH  = OUTPUT_DIR / "river_centroids.npy"
-EHS_PATH        = OUTPUT_DIR / "river_ehs.bin"
-OUTPUT_PATH     = OUTPUT_DIR / "river_labels_viz.png"
-K               = 8192
+OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
+LABELS_PATH = OUTPUT_DIR / "river_labels.bin"
+CENTROIDS_PATH = OUTPUT_DIR / "river_centroids.npy"
+EHS_PATH = OUTPUT_DIR / "river_ehs.bin"
+OUTPUT_PATH = OUTPUT_DIR / "river_labels_viz.png"
+K = 8192
 
 
 # ── Data loading ─────────────────────────────────────────────────────
@@ -37,8 +38,9 @@ def load_label_counts(path, k, chunk=100_000_000):
     return counts, n
 
 
-def load_counts_and_examples(path, k, cluster_ids, n_examples=5, seed=None,
-                             chunk=100_000_000):
+def load_counts_and_examples(
+    path, k, cluster_ids, n_examples=5, seed=None, chunk=100_000_000
+):
     """Single-pass scan: compute per-cluster counts and collect reservoir samples.
 
     Combining both operations avoids a second full read of the labels file.
@@ -49,13 +51,13 @@ def load_counts_and_examples(path, k, cluster_ids, n_examples=5, seed=None,
     labels = np.memmap(path, dtype=np.uint16, mode="r")
     n = len(labels)
 
-    counts    = np.zeros(k, dtype=np.int64)
+    counts = np.zeros(k, dtype=np.int64)
     reservoir = {cid: [] for cid in cluster_ids}
-    seen      = {cid: 0   for cid in cluster_ids}
+    seen = {cid: 0 for cid in cluster_ids}
     target_set = set(cluster_ids)
 
     for start in range(0, n, chunk):
-        end        = min(start + chunk, n)
+        end = min(start + chunk, n)
         chunk_data = np.array(labels[start:end])
 
         counts += np.bincount(chunk_data, minlength=k)
@@ -66,7 +68,7 @@ def load_counts_and_examples(path, k, cluster_ids, n_examples=5, seed=None,
                 continue
 
             k0 = seen[cid]
-            m  = len(matches)
+            m = len(matches)
             seen[cid] = k0 + m
 
             # Fill empty slots directly
@@ -75,15 +77,15 @@ def load_counts_and_examples(path, k, cluster_ids, n_examples=5, seed=None,
                 reservoir[cid].extend(matches[:fill].tolist())
                 matches = matches[fill:]
                 k0 += fill
-                m  -= fill
+                m -= fill
 
             # Reservoir replacement for remaining matches
             if m > 0 and len(reservoir[cid]) == n_examples:
-                ranks  = np.arange(k0, k0 + m, dtype=np.int64)
+                ranks = np.arange(k0, k0 + m, dtype=np.int64)
                 accept = rng.random(m) < (n_examples / (ranks + 1))
                 if accept.any():
                     chosen = matches[accept]
-                    slots  = rng.integers(0, n_examples, size=len(chosen))
+                    slots = rng.integers(0, n_examples, size=len(chosen))
                     for gi, slot in zip(chosen.tolist(), slots.tolist()):
                         reservoir[cid][slot] = gi
 
@@ -101,21 +103,27 @@ def try_import_hand_indexer():
     """Try to import the hand_indexer pybind module."""
     try:
         from hand_indexer import RiverIndexer
+
         return RiverIndexer()
     except ImportError:
         return None
 
 
-def find_example_indices(labels_path, cluster_ids, n_examples=5, seed=None,
-                         chunk=100_000_000):
+def find_example_indices(
+    labels_path, cluster_ids, n_examples=5, seed=None, chunk=100_000_000
+):
     """Scan labels memmap to find n_examples random hand indices per cluster.
 
     Prefer load_counts_and_examples when counts are not yet known, to avoid
     reading the file twice.
     """
     _, _, reservoir = load_counts_and_examples(
-        labels_path, max(cluster_ids) + 1, cluster_ids,
-        n_examples=n_examples, seed=seed, chunk=chunk,
+        labels_path,
+        max(cluster_ids) + 1,
+        cluster_ids,
+        n_examples=n_examples,
+        seed=seed,
+        chunk=chunk,
     )
     return reservoir
 
@@ -131,35 +139,35 @@ def gini(counts):
 
 def print_stats(counts, n, k):
     used = np.count_nonzero(counts)
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  River Label Statistics")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Total labels:    {n:>16,}")
     print(f"  Clusters (K):    {k:>16,}")
-    print(f"  Clusters used:   {used:>16,}  ({used/k*100:.1f}%)")
+    print(f"  Clusters used:   {used:>16,}  ({used / k * 100:.1f}%)")
     print(f"  Empty clusters:  {k - used:>16,}")
-    print(f"{'-'*60}")
+    print(f"{'-' * 60}")
     print(f"  Min size:        {counts.min():>16,}")
     print(f"  Max size:        {counts.max():>16,}")
     print(f"  Mean size:       {counts.mean():>16,.1f}")
     print(f"  Median size:     {int(np.median(counts)):>16,}")
     print(f"  Std dev:         {counts.std():>16,.1f}")
     print(f"  Gini coeff:      {gini(counts):>16.4f}")
-    print(f"{'-'*60}")
+    print(f"{'-' * 60}")
 
     top_idx = np.argsort(counts)[::-1]
     print("  Top 10 clusters:")
     for i in range(min(10, k)):
         ci = top_idx[i]
-        print(f"    #{ci:<8d}  {counts[ci]:>12,} hands  ({counts[ci]/n*100:.4f}%)")
+        print(f"    #{ci:<8d}  {counts[ci]:>12,} hands  ({counts[ci] / n * 100:.4f}%)")
 
     print("  Bottom 10 non-empty clusters:")
     nonzero = top_idx[top_idx < used] if used < k else top_idx
     bottom = np.argsort(counts)
     bottom_nz = bottom[counts[bottom] > 0][:10]
     for ci in bottom_nz:
-        print(f"    #{ci:<8d}  {counts[ci]:>12,} hands  ({counts[ci]/n*100:.6f}%)")
-    print(f"{'='*60}\n")
+        print(f"    #{ci:<8d}  {counts[ci]:>12,} hands  ({counts[ci] / n * 100:.6f}%)")
+    print(f"{'=' * 60}\n")
 
 
 # ── Plotting ─────────────────────────────────────────────────────────
@@ -173,8 +181,20 @@ def plot_cluster_sizes(axes, counts, n):
     ax1.set_xlabel("Hands per cluster")
     ax1.set_ylabel("Number of clusters (log)")
     ax1.set_title("Cluster Size Distribution")
-    ax1.axvline(counts.mean(), color="#F44336", ls="--", lw=1.2, label=f"mean={counts.mean():,.0f}")
-    ax1.axvline(np.median(counts), color="#FF9800", ls="--", lw=1.2, label=f"median={int(np.median(counts)):,}")
+    ax1.axvline(
+        counts.mean(),
+        color="#F44336",
+        ls="--",
+        lw=1.2,
+        label=f"mean={counts.mean():,.0f}",
+    )
+    ax1.axvline(
+        np.median(counts),
+        color="#FF9800",
+        ls="--",
+        lw=1.2,
+        label=f"median={int(np.median(counts)):,}",
+    )
     ax1.legend(fontsize=8)
 
     # 2) Rank-size (log-log)
@@ -199,9 +219,14 @@ def plot_cluster_sizes(axes, counts, n):
     # Find and annotate where 50% coverage occurs
     idx50 = np.searchsorted(cumulative, 0.5)
     pct50 = idx50 / len(ranks) * 100
-    ax3.annotate(f"50% at top {pct50:.1f}%", xy=(pct50, 50),
-                 fontsize=8, color="#9C27B0",
-                 xytext=(pct50 + 10, 40), arrowprops=dict(arrowstyle="->", color="#9C27B0"))
+    ax3.annotate(
+        f"50% at top {pct50:.1f}%",
+        xy=(pct50, 50),
+        fontsize=8,
+        color="#9C27B0",
+        xytext=(pct50 + 10, 40),
+        arrowprops=dict(arrowstyle="->", color="#9C27B0"),
+    )
 
 
 def compute_centroid_features(centroids, mean_ehs):
@@ -210,7 +235,7 @@ def compute_centroid_features(centroids, mean_ehs):
     centered = centroids - mean_vec
     U, S, Vt = np.linalg.svd(centered, full_matrices=False)
     proj = centered @ Vt[:2].T  # (K, 2)
-    var_explained = S[:2] ** 2 / np.sum(S ** 2) * 100
+    var_explained = S[:2] ** 2 / np.sum(S**2) * 100
     return mean_ehs, proj, var_explained
 
 
@@ -220,9 +245,17 @@ def plot_centroids(axes, centroids, counts, mean_ehs, proj, var_explained):
     k = centroids.shape[0]
 
     # 4) PCA projection colored by mean EHS
-    sc = ax4.scatter(proj[:, 0], proj[:, 1],
-                     c=mean_ehs, cmap="RdYlGn", vmin=0, vmax=1,
-                     s=1, alpha=0.5, rasterized=True)
+    sc = ax4.scatter(
+        proj[:, 0],
+        proj[:, 1],
+        c=mean_ehs,
+        cmap="RdYlGn",
+        vmin=0,
+        vmax=1,
+        s=1,
+        alpha=0.5,
+        rasterized=True,
+    )
     ax4.set_xlabel(f"PC1 ({var_explained[0]:.1f}% var)")
     ax4.set_ylabel(f"PC2 ({var_explained[1]:.1f}% var)")
     ax4.set_title("PCA of Centroids (color = mean EHS)")
@@ -239,8 +272,14 @@ def plot_centroids(axes, centroids, counts, mean_ehs, proj, var_explained):
         end = (qi + 1) * quintile_size if qi < 4 else k
         idx = size_order[start:end]
         mean_profile = centroids[idx].mean(axis=0) / 255.0
-        ax5.plot(x_buckets, mean_profile, color=colors[qi],
-                 lw=1.2, label=quintile_labels[qi], alpha=0.9)
+        ax5.plot(
+            x_buckets,
+            mean_profile,
+            color=colors[qi],
+            lw=1.2,
+            label=quintile_labels[qi],
+            alpha=0.9,
+        )
     # Preflop category boundaries: Pairs 0-12 | Suited 13-90 | Offsuit 91-168
     ax5.axvline(13, color="gray", ls="--", lw=1.0, alpha=0.7)
     ax5.axvline(91, color="gray", ls="--", lw=1.0, alpha=0.7)
@@ -263,8 +302,9 @@ def plot_centroids(axes, centroids, counts, mean_ehs, proj, var_explained):
     norms = np.linalg.norm(sample_c, axis=1, keepdims=True).clip(1e-10)
     normed = sample_c / norms
     sim = normed @ normed.T
-    im = ax6.imshow(sim, cmap="RdBu_r", vmin=-0.2, vmax=1.0,
-                    aspect="auto", interpolation="nearest")
+    im = ax6.imshow(
+        sim, cmap="RdBu_r", vmin=-0.2, vmax=1.0, aspect="auto", interpolation="nearest"
+    )
     ax6.set_xlabel("Centroid (sorted by mean EHS)")
     ax6.set_ylabel("Centroid (sorted by mean EHS)")
     ax6.set_title("Cosine Similarity (200 sampled)")
@@ -273,8 +313,8 @@ def plot_centroids(axes, centroids, counts, mean_ehs, proj, var_explained):
 
 # ── Card rendering ───────────────────────────────────────────────────
 SUIT_SYMBOLS = {"c": "\u2663", "d": "\u2666", "h": "\u2665", "s": "\u2660"}
-SUIT_COLORS  = {"c": "#228B22", "d": "#1565C0", "h": "#CC0000", "s": "#222222"}
-RANK_EXPAND  = {"T": "10"}
+SUIT_COLORS = {"c": "#228B22", "d": "#1565C0", "h": "#CC0000", "s": "#222222"}
+RANK_EXPAND = {"T": "10"}
 
 
 def render_hand_line(ax, hand_str, x0, y, fontsize=9):
@@ -294,16 +334,39 @@ def render_hand_line(ax, hand_str, x0, y, fontsize=9):
         suit_sym = SUIT_SYMBOLS.get(suit_ch, suit_ch)
         suit_col = SUIT_COLORS.get(suit_ch, "#333333")
         # Render rank in dark, suit in color
-        ax.text(x, y, rank_display, fontsize=fontsize, fontweight="bold",
-                color="#333333", fontfamily="monospace", transform=ax.transAxes)
+        ax.text(
+            x,
+            y,
+            rank_display,
+            fontsize=fontsize,
+            fontweight="bold",
+            color="#333333",
+            fontfamily="monospace",
+            transform=ax.transAxes,
+        )
         x += cw * len(rank_display)
-        ax.text(x, y, suit_sym, fontsize=fontsize, fontweight="bold",
-                color=suit_col, fontfamily="monospace", transform=ax.transAxes)
+        ax.text(
+            x,
+            y,
+            suit_sym,
+            fontsize=fontsize,
+            fontweight="bold",
+            color=suit_col,
+            fontfamily="monospace",
+            transform=ax.transAxes,
+        )
         x += cw * 1.5  # gap after card
 
     # Separator
-    ax.text(x, y, "|", fontsize=fontsize, color="#999999",
-            fontfamily="monospace", transform=ax.transAxes)
+    ax.text(
+        x,
+        y,
+        "|",
+        fontsize=fontsize,
+        color="#999999",
+        fontfamily="monospace",
+        transform=ax.transAxes,
+    )
     x += cw * 2
 
     for card in board_cards:
@@ -313,11 +376,25 @@ def render_hand_line(ax, hand_str, x0, y, fontsize=9):
         rank_display = RANK_EXPAND.get(rank_ch, rank_ch)
         suit_sym = SUIT_SYMBOLS.get(suit_ch, suit_ch)
         suit_col = SUIT_COLORS.get(suit_ch, "#333333")
-        ax.text(x, y, rank_display, fontsize=fontsize,
-                color="#555555", fontfamily="monospace", transform=ax.transAxes)
+        ax.text(
+            x,
+            y,
+            rank_display,
+            fontsize=fontsize,
+            color="#555555",
+            fontfamily="monospace",
+            transform=ax.transAxes,
+        )
         x += cw * len(rank_display)
-        ax.text(x, y, suit_sym, fontsize=fontsize,
-                color=suit_col, fontfamily="monospace", transform=ax.transAxes)
+        ax.text(
+            x,
+            y,
+            suit_sym,
+            fontsize=fontsize,
+            color=suit_col,
+            fontfamily="monospace",
+            transform=ax.transAxes,
+        )
         x += cw * 1.5
 
 
@@ -339,27 +416,37 @@ def select_representatives(mean_ehs, counts):
     return np.array(reps)
 
 
-def plot_representatives(centroids, counts, mean_ehs, proj, var_explained,
-                         output_path):
+def plot_representatives(centroids, counts, mean_ehs, proj, var_explained, output_path):
     """Second figure: PCA and rank-size with representatives marked (1×2)."""
     reps = select_representatives(mean_ehs, counts)
     rep_colors = [REP_CMAP(p / 100) for p in REP_PERCENTILES]
-    rep_labels = [f"P{p} (#{reps[i]}, EHS={mean_ehs[reps[i]]:.2f})"
-                  for i, p in enumerate(REP_PERCENTILES)]
+    rep_labels = [
+        f"P{p} (#{reps[i]}, EHS={mean_ehs[reps[i]]:.2f})"
+        for i, p in enumerate(REP_PERCENTILES)
+    ]
     rank_of = np.argsort(np.argsort(counts)[::-1])
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 7))
-    fig.suptitle("Representative Cluster Deep-Dive", fontsize=14,
-                 fontweight="bold", y=0.98)
+    fig.suptitle(
+        "Representative Cluster Deep-Dive", fontsize=14, fontweight="bold", y=0.98
+    )
 
     # Left: PCA with representatives highlighted
-    ax1.scatter(proj[:, 0], proj[:, 1], c="lightgray", s=0.3, alpha=0.3,
-                rasterized=True)
+    ax1.scatter(
+        proj[:, 0], proj[:, 1], c="lightgray", s=0.3, alpha=0.3, rasterized=True
+    )
     for i, ci in enumerate(reps):
-        ax1.scatter(proj[ci, 0], proj[ci, 1],
-                    c=[rep_colors[i]], s=120, marker=REP_MARKERS[i],
-                    edgecolors="black", linewidths=0.8, zorder=5,
-                    label=rep_labels[i])
+        ax1.scatter(
+            proj[ci, 0],
+            proj[ci, 1],
+            c=[rep_colors[i]],
+            s=120,
+            marker=REP_MARKERS[i],
+            edgecolors="black",
+            linewidths=0.8,
+            zorder=5,
+            label=rep_labels[i],
+        )
     ax1.set_xlabel(f"PC1 ({var_explained[0]:.1f}% var)", fontsize=11)
     ax1.set_ylabel(f"PC2 ({var_explained[1]:.1f}% var)", fontsize=11)
     ax1.set_title("Representatives on PCA Map", fontsize=12)
@@ -371,9 +458,17 @@ def plot_representatives(centroids, counts, mean_ehs, proj, var_explained,
     ax2.loglog(ranks_arr, sorted_desc, color="#BBBBBB", lw=0.8, zorder=1)
     for i, ci in enumerate(reps):
         r = rank_of[ci] + 1
-        ax2.scatter(r, counts[ci], c=[rep_colors[i]], s=100,
-                    marker=REP_MARKERS[i], edgecolors="black", linewidths=0.8,
-                    zorder=5, label=f"#{ci}: {counts[ci]:,} hands (rank {r:,})")
+        ax2.scatter(
+            r,
+            counts[ci],
+            c=[rep_colors[i]],
+            s=100,
+            marker=REP_MARKERS[i],
+            edgecolors="black",
+            linewidths=0.8,
+            zorder=5,
+            label=f"#{ci}: {counts[ci]:,} hands (rank {r:,})",
+        )
     ax2.set_xlabel("Cluster rank", fontsize=11)
     ax2.set_ylabel("Cluster size (hands)", fontsize=11)
     ax2.set_title("Representatives on Rank-Size Curve", fontsize=12)
@@ -399,11 +494,14 @@ def plot_hands(counts, mean_ehs, output_path, hand_examples):
 
     fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(16, 13))
     fig.subplots_adjust(wspace=0.05)
-    fig.suptitle("Example Hands by EHS Percentile (hole | board)",
-                 fontsize=14, fontweight="bold", y=0.98)
+    fig.suptitle(
+        "Example Hands by EHS Percentile (hole | board)",
+        fontsize=14,
+        fontweight="bold",
+        y=0.98,
+    )
 
-    for ax_col, start_i, count in [(ax_left, 0, n_left),
-                                    (ax_right, n_left, n_right)]:
+    for ax_col, start_i, count in [(ax_left, 0, n_left), (ax_right, n_left, n_right)]:
         ax_col.axis("off")
         y = 0.96
         for j in range(count):
@@ -415,13 +513,25 @@ def plot_hands(counts, mean_ehs, output_path, hand_examples):
             size = counts[ci]
 
             # Header with colored percentile badge
-            ax_col.text(0.0, y, f"P{pct}",
-                        fontsize=11, fontweight="bold", color=color,
-                        fontfamily="monospace", transform=ax_col.transAxes)
-            ax_col.text(0.08, y,
-                        f"EHS={ehs:.2f}   {size:,} hands   (rank {rank_of[ci]+1:,})",
-                        fontsize=10, color="#333333",
-                        fontfamily="monospace", transform=ax_col.transAxes)
+            ax_col.text(
+                0.0,
+                y,
+                f"P{pct}",
+                fontsize=11,
+                fontweight="bold",
+                color=color,
+                fontfamily="monospace",
+                transform=ax_col.transAxes,
+            )
+            ax_col.text(
+                0.08,
+                y,
+                f"EHS={ehs:.2f}   {size:,} hands   (rank {rank_of[ci] + 1:,})",
+                fontsize=10,
+                color="#333333",
+                fontfamily="monospace",
+                transform=ax_col.transAxes,
+            )
             y -= 0.030
 
             # Example hands
@@ -438,10 +548,10 @@ def plot_hands(counts, mean_ehs, output_path, hand_examples):
 
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
-    labels_path     = os.path.abspath(LABELS_PATH)
-    centroids_path  = os.path.abspath(CENTROIDS_PATH)
-    output_path     = os.path.abspath(OUTPUT_PATH)
-    k               = K
+    labels_path = os.path.abspath(LABELS_PATH)
+    centroids_path = os.path.abspath(CENTROIDS_PATH)
+    output_path = os.path.abspath(OUTPUT_PATH)
+    k = K
 
     if not os.path.isfile(labels_path):
         sys.exit(f"Error: labels file not found: {labels_path}")
@@ -459,12 +569,16 @@ def main():
     if has_centroids:
         ehs_path = os.path.abspath(EHS_PATH)
         if not os.path.isfile(ehs_path):
-            print(f"WARNING: EHS file not found at {ehs_path} — skipping centroid plots.")
+            print(
+                f"WARNING: EHS file not found at {ehs_path} — skipping centroid plots."
+            )
             has_centroids = False
         else:
             print(f"EHS loaded from {ehs_path}")
             mean_ehs = np.fromfile(ehs_path, dtype=np.float32)
-            mean_ehs, proj, var_explained = compute_centroid_features(centroids, mean_ehs)
+            mean_ehs, proj, var_explained = compute_centroid_features(
+                centroids, mean_ehs
+            )
 
     # Single-pass scan: counts + reservoir samples for representative clusters
     indexer = try_import_hand_indexer()
@@ -474,7 +588,8 @@ def main():
         reps = select_representatives(mean_ehs, np.ones(k, dtype=np.int64))
         print(f"Loading labels from {labels_path} (single pass: counts + examples) ...")
         counts, n, idx_map = load_counts_and_examples(
-            labels_path, k, reps.tolist(), n_examples=REP_N_EXAMPLES)
+            labels_path, k, reps.tolist(), n_examples=REP_N_EXAMPLES
+        )
         print(f"  {n:,} labels loaded, K={k}")
 
         all_indices, index_owners = [], []
@@ -501,7 +616,10 @@ def main():
     fig, axes = plt.subplots(nrows, 3, figsize=(18, 6 * nrows))
     fig.suptitle(
         f"River Bucket Label Analysis — {n:,} hands  ×  {k:,} clusters",
-        fontsize=14, fontweight="bold", y=0.98)
+        fontsize=14,
+        fontweight="bold",
+        y=0.98,
+    )
 
     top_axes = axes[0] if nrows == 2 else axes
     plot_cluster_sizes(top_axes, counts, n)
@@ -518,8 +636,9 @@ def main():
     if has_centroids:
         base, ext = os.path.splitext(output_path)
         reps_path = base + "_representatives" + ext
-        plot_representatives(centroids, counts, mean_ehs, proj,
-                             var_explained, reps_path)
+        plot_representatives(
+            centroids, counts, mean_ehs, proj, var_explained, reps_path
+        )
 
     # ── Figure 3: Example hands ───────────────────────────────────
     if has_centroids:

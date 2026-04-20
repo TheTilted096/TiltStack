@@ -22,7 +22,7 @@ void CFRGame::initState(int ss1, int ss2, bool h) {
 
     history[0].pot = SMALL_BLIND + BIG_BLIND;
     history[0].toCall = BIG_BLIND - SMALL_BLIND;
-    history[0].stm = 0; // little blind
+    history[0].stm = 0;             // little blind
     history[0].act = Action::BET50; // big blind does a half pot bet to start
 }
 
@@ -163,29 +163,30 @@ void CFRGame::makeBet(int amount_milli) {
     } else if (amount_milli <= last.toCall) {
         a = Action::CALL;
     } else if (amount_milli >= allinAmt) {
-        a      = Action::ALLIN;
-        amount_milli = allinAmt;   // clamp to avoid over-committing
+        a = Action::ALLIN;
+        amount_milli = allinAmt; // clamp to avoid over-committing
     } else {
         // Raise fraction: raise component above the call / effective pot.
-        int   effPot   = last.pot + last.toCall;
-        float fraction = (effPot > 0)
-            ? static_cast<float>(amount_milli - last.toCall) / effPot
-            : 0.0f;
+        int effPot = last.pot + last.toCall;
+        float fraction =
+            (effPot > 0)
+                ? static_cast<float>(amount_milli - last.toCall) / effPot
+                : 0.0f;
         a = (fraction < 0.75f) ? Action::BET50 : Action::BET100;
     }
 
     bool streetEnded = endsStreet(a);
-    isTerminal       = isTerminalState(a);
+    isTerminal = isTerminalState(a);
 
     ply++;
     BoardState &now = history[ply];
-    now.act    = a;
-    now.pot    = last.pot + amount_milli;
+    now.act = a;
+    now.pot = last.pot + amount_milli;
     now.toCall = amount_milli - last.toCall;
     stacks[last.stm] -= amount_milli;
 
     int roundNum = static_cast<int>(currentRound);
-    int numActs  = actionCount[roundNum];
+    int numActs = actionCount[roundNum];
     actionCount[roundNum]++;
 
     betHist[roundNum][numActs] =
@@ -340,9 +341,9 @@ InfoSet CFRGame::getInfo() {
     // stm==0 → p0 hole cards at rawDeck[0,1]; stm==1 → p1 at rawDeck[2,3]
     int holeBase = stm * 2;
     info.hole = (1ULL << rawDeck[holeBase]) | (1ULL << rawDeck[holeBase + 1]);
-    info.flop = ((1ULL << rawDeck[4]) | (1ULL << rawDeck[5]) |
-                 (1ULL << rawDeck[6])) *
-                (currentRound >= Round::FLOP);
+    info.flop =
+        ((1ULL << rawDeck[4]) | (1ULL << rawDeck[5]) | (1ULL << rawDeck[6])) *
+        (currentRound >= Round::FLOP);
     info.turn = (1ULL << rawDeck[7]) * (currentRound >= Round::TURN);
     info.river = (1ULL << rawDeck[8]) * (currentRound >= Round::RIVER);
 
@@ -370,15 +371,15 @@ void loadTables(const std::string &clusters_dir) {
     const std::string d = clusters_dir + "/";
 
     readU16File(d + "preflop_ehs_fine.bin", gEHS[0]);
-    readU16File(d + "flop_ehs_fine.bin",    gEHS[1]);
-    readU16File(d + "turn_ehs_fine.bin",    gEHS[2]);
-    readU16File(d + "river_ehs_fine.bin",   gEHS[3]);
+    readU16File(d + "flop_ehs_fine.bin", gEHS[1]);
+    readU16File(d + "turn_ehs_fine.bin", gEHS[2]);
+    readU16File(d + "river_ehs_fine.bin", gEHS[3]);
 
     gLabels[0].resize(gEHS[0].size());
     std::iota(gLabels[0].begin(), gLabels[0].end(), uint16_t{0});
 
-    readU16File(d + "flop_labels.bin",  gLabels[1]);
-    readU16File(d + "turn_labels.bin",  gLabels[2]);
+    readU16File(d + "flop_labels.bin", gLabels[1]);
+    readU16File(d + "turn_labels.bin", gLabels[2]);
     readU16File(d + "river_labels.bin", gLabels[3]);
 
     uint8_t rounds[] = {2, 3, 1, 1};

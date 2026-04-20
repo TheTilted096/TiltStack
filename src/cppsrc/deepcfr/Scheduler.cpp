@@ -87,7 +87,8 @@ void Scheduler::flushBatch() {
     if (advReservoir)
         advReservoir->insert(threadId, advantageInputs, advantageOutputs);
     if (polReservoir)
-        polReservoir->insert(threadId, policyInputs, policyOutputs, &policyWeights);
+        polReservoir->insert(threadId, policyInputs, policyOutputs,
+                             &policyWeights);
 
     advantageInputs.clear();
     advantageOutputs.clear();

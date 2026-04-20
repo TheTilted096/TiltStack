@@ -42,7 +42,7 @@ import torch.nn.functional as F
 import pyspiel
 
 _EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_EVAL_DIR, '..', 'deepcfr'))
+sys.path.insert(0, os.path.join(_EVAL_DIR, "..", "deepcfr"))
 
 import deepcfr
 from network_training import DeepCFRNet, decode_batch, NUM_ACTIONS
@@ -51,11 +51,11 @@ from network_training import DeepCFRNet, decode_batch, NUM_ACTIONS
 # Action index constants (must match CFRTypes.h Action enum)
 # ---------------------------------------------------------------------------
 
-_CHECK  = 0   # also FOLD when to_call > 0
-_CALL   = 1
-_BET50  = 2
+_CHECK = 0  # also FOLD when to_call > 0
+_CALL = 1
+_BET50 = 2
 _BET100 = 3
-_ALLIN  = 4
+_ALLIN = 4
 
 # ---------------------------------------------------------------------------
 # Scale factor: 1 OpenSpiel chip == OSP_MC_SCALE CFRGame milli-chips.
@@ -63,21 +63,22 @@ _ALLIN  = 4
 # Update if the OpenSpiel game string uses different stack sizes.
 # ---------------------------------------------------------------------------
 
-STARTING_STACK = 40_000   # milli-chips (CFRGame constant)
-OSP_STACK      = 2_000    # chips (must match stack= in the game string)
-OSP_MC_SCALE   = STARTING_STACK // OSP_STACK   # = 20
+STARTING_STACK = 40_000  # milli-chips (CFRGame constant)
+OSP_STACK = 2_000  # chips (must match stack= in the game string)
+OSP_MC_SCALE = STARTING_STACK // OSP_STACK  # = 20
 
 
 # ---------------------------------------------------------------------------
 # Checkpoint loading
 # ---------------------------------------------------------------------------
 
+
 def load_net_auto(path: str, device) -> DeepCFRNet:
     """Load a DeepCFRNet checkpoint."""
     ckpt = torch.load(path, map_location=device, weights_only=True)
-    sd   = ckpt['net']
-    if any(k.startswith('_orig_mod.') for k in sd):
-        sd = {k.removeprefix('_orig_mod.'): v for k, v in sd.items()}
+    sd = ckpt["net"]
+    if any(k.startswith("_orig_mod.") for k in sd):
+        sd = {k.removeprefix("_orig_mod."): v for k, v in sd.items()}
     net = DeepCFRNet()
     net.load_state_dict(sd)
     return net.to(device).eval()
@@ -86,6 +87,7 @@ def load_net_auto(path: str, device) -> DeepCFRNet:
 # ---------------------------------------------------------------------------
 # History helpers
 # ---------------------------------------------------------------------------
+
 
 def _split_history(osp_game, state):
     """
@@ -105,7 +107,7 @@ def _split_history(osp_game, state):
     """
     tmp = osp_game.new_initial_state()
     deal_cards = []
-    bet_seq    = []
+    bet_seq = []
 
     for action in state.history():
         if tmp.is_chance_node():
@@ -125,7 +127,7 @@ def _pad_to_9(deal_cards):
     but the EHS / bucket values for unreached streets are gated by currentRound
     inside CFRGame::getInfo() and never exposed to the network.
     """
-    used   = set(deal_cards[:9])
+    used = set(deal_cards[:9])
     result = list(deal_cards[:9])
     for c in range(52):
         if len(result) >= 9:
@@ -140,6 +142,7 @@ def _pad_to_9(deal_cards):
 # CFRGame action helpers
 # ---------------------------------------------------------------------------
 
+
 def _cfr_bet_amounts(game):
     """
     Return the milli-chip cost of each abstract raise action in the current
@@ -148,15 +151,15 @@ def _cfr_bet_amounts(game):
     Returns a dict {action_int: milli_chips} for BET50, BET100, ALLIN.
     CHECK and CALL are not raises so they are omitted.
     """
-    pot     = game.pot
+    pot = game.pot
     to_call = game.to_call
-    stm     = game.stm
-    stacks  = game.stacks
+    stm = game.stm
+    stacks = game.stacks
 
     return {
-        _BET50:  to_call + (pot + to_call) // 2,
+        _BET50: to_call + (pot + to_call) // 2,
         _BET100: to_call + (pot + to_call),
-        _ALLIN:  min(stacks[stm], to_call + stacks[1 - stm]),
+        _ALLIN: min(stacks[stm], to_call + stacks[1 - stm]),
     }
 
 
@@ -173,7 +176,11 @@ def _abstract_to_osp(abstract_action, legal_osp, game):
 
     if abstract_action == _CHECK:
         # to_call > 0 means we face a live bet — CHECK is a fold in CFRGame.
-        return fold_action if (game.to_call > 0 and fold_action is not None) else call_action
+        return (
+            fold_action
+            if (game.to_call > 0 and fold_action is not None)
+            else call_action
+        )
 
     if abstract_action == _CALL:
         return call_action
@@ -184,8 +191,8 @@ def _abstract_to_osp(abstract_action, legal_osp, game):
     if not raise_osp:
         return call_action
 
-    amount_added_mc  = _cfr_bet_amounts(game)[abstract_action]
-    invested_mc      = STARTING_STACK - game.stacks[game.stm]
+    amount_added_mc = _cfr_bet_amounts(game)[abstract_action]
+    invested_mc = STARTING_STACK - game.stacks[game.stm]
     target_total_chips = (invested_mc + amount_added_mc) / OSP_MC_SCALE
     return min(raise_osp, key=lambda a: abs(a - target_total_chips))
 
@@ -193,6 +200,7 @@ def _abstract_to_osp(abstract_action, legal_osp, game):
 # ---------------------------------------------------------------------------
 # Shared base logic (mixin — not a standalone pyspiel.Bot)
 # ---------------------------------------------------------------------------
+
 
 class _CFRBotMixin:
     """
@@ -215,24 +223,25 @@ class _CFRBotMixin:
         deal_cards, bet_seq = _split_history(self.osp_game, state)
 
         if len(deal_cards) < 4:
-            return False    # hole cards not yet dealt
+            return False  # hole cards not yet dealt
 
         cards9 = _pad_to_9(deal_cards)
         self.game.begin_with_cards(
-            STARTING_STACK, STARTING_STACK,
-            state.current_player() == 0,   # hero = True for player 0 (small blind)
+            STARTING_STACK,
+            STARTING_STACK,
+            state.current_player() == 0,  # hero = True for player 0 (small blind)
             cards9,
         )
 
         for player, osp_action in bet_seq:
-            if osp_action == 0:                          # fold
+            if osp_action == 0:  # fold
                 self.game.make_move(_CHECK)
-            elif osp_action == 1:                        # call / check
+            elif osp_action == 1:  # call / check
                 legal = self.game.generate_actions()
                 self.game.make_move(_CALL if _CALL in legal else _CHECK)
-            else:                                        # raise — action is total chips invested
+            else:  # raise — action is total chips invested
                 stm = self.game.stm
-                invested_mc    = STARTING_STACK - self.game.stacks[stm]
+                invested_mc = STARTING_STACK - self.game.stacks[stm]
                 amount_added_mc = osp_action * OSP_MC_SCALE - invested_mc
                 self.game.make_bet(amount_added_mc)
 
@@ -252,7 +261,7 @@ class _CFRBotMixin:
         masked_logits : np.ndarray, shape (NUM_ACTIONS,), dtype float32
         legal_abstract : list[int]
         """
-        raw             = self.game.get_info()           # (1, 168) uint8
+        raw = self.game.get_info()  # (1, 168) uint8
         x_cont, buckets = decode_batch(raw)
         with torch.no_grad():
             logits = model(x_cont.to(self.device), buckets.to(self.device))
@@ -269,6 +278,7 @@ class _CFRBotMixin:
 # Agents
 # ---------------------------------------------------------------------------
 
+
 class TiltStack_DeepCFR(_CFRBotMixin, pyspiel.Bot):
     """
     GTO-approximating agent backed by the trained strategy network (policy*.pt).
@@ -284,12 +294,12 @@ class TiltStack_DeepCFR(_CFRBotMixin, pyspiel.Bot):
     device   : str         — 'cpu' or 'cuda'
     """
 
-    def __init__(self, model: DeepCFRNet, osp_game, device: str = 'cpu'):
+    def __init__(self, model: DeepCFRNet, osp_game, device: str = "cpu"):
         pyspiel.Bot.__init__(self)
-        self.model    = model.to(device).eval()
+        self.model = model.to(device).eval()
         self.osp_game = osp_game
-        self.device   = torch.device(device)
-        self.game     = deepcfr.CFRGame()
+        self.device = torch.device(device)
+        self.game = deepcfr.CFRGame()
 
     def step(self, state) -> int:
         if not self._sync_game(state):
@@ -297,7 +307,7 @@ class TiltStack_DeepCFR(_CFRBotMixin, pyspiel.Bot):
             return 1 if 1 in legal else legal[0]
 
         masked_logits, _ = self._forward(self.model)
-        probs      = F.softmax(torch.from_numpy(masked_logits), dim=0).numpy()
+        probs = F.softmax(torch.from_numpy(masked_logits), dim=0).numpy()
         our_action = int(np.random.choice(NUM_ACTIONS, p=probs))
         return _abstract_to_osp(our_action, state.legal_actions(), self.game)
 
@@ -320,14 +330,15 @@ class Anti_TiltStack_NBR(_CFRBotMixin, pyspiel.Bot):
     device   : str
     """
 
-    def __init__(self, model_p0: DeepCFRNet, model_p1: DeepCFRNet,
-                 osp_game, device: str = 'cpu'):
+    def __init__(
+        self, model_p0: DeepCFRNet, model_p1: DeepCFRNet, osp_game, device: str = "cpu"
+    ):
         pyspiel.Bot.__init__(self)
         self.model_p0 = model_p0.to(device).eval()
         self.model_p1 = model_p1.to(device).eval()
         self.osp_game = osp_game
-        self.device   = torch.device(device)
-        self.game     = deepcfr.CFRGame()
+        self.device = torch.device(device)
+        self.game = deepcfr.CFRGame()
 
     def step(self, state) -> int:
         if not self._sync_game(state):

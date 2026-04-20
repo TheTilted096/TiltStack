@@ -4,93 +4,87 @@
 
 ### System Dependencies
 
-- **C++ compiler**: g++ 10+ or clang++ 12+ with C++17 support (C++20 for the Leduc demo)
-- **OpenMP**: Required for multi-threaded equity computation in the Hold'em pipeline
-- **CUDA**: Required for FAISS GPU clustering (tested with CUDA 11.x / 12.x)
-- **Conda**: [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or Anaconda
-
-On Ubuntu/Debian:
-```bash
-sudo apt-get install build-essential libomp-dev
-```
+- **C++ compiler**: g++ 10+ or clang++ 12+ with C++20 support
+- **CMake**: 3.20+
+- **OpenMP**: Required for multi-threaded equity computation
+- **CUDA**: Required for FAISS GPU clustering (tested with CUDA 12.4)
+- **uv**: [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 On RHEL/Fedora:
 ```bash
-sudo dnf install gcc-c++ libgomp-devel
+dnf install gcc-c++ libgomp-devel cmake
+```
+
+On Ubuntu/Debian:
+```bash
+apt-get install build-essential libomp-dev cmake
 ```
 
 ---
 
 ## Environment Setup
 
-### Option A: Conda (Recommended)
+All Python dependencies are managed by [uv](https://docs.astral.sh/uv/).
 
 ```bash
-conda env create -f environment.yml
-conda activate tiltstack
+# Install core dependencies (torch, faiss-gpu-cu12, numpy, etc.)
+uv sync
+
+# Also install demo dependencies (rlcard, streamlit, plotly)
+uv sync --extra demos
 ```
 
-This installs Python 3.11, NumPy, Matplotlib, PyBind11, and FAISS with GPU support.
-
-A GPU is required — the clustering pipelines are not practical to run on CPU given the dataset sizes (2.4B river states, ~55M turn states).
-
-### Option B: pip
-
-```bash
-pip install -r requirements.txt
-```
-
-The root `requirements.txt` lists `faiss-cpu`. Replace it with `faiss-gpu` — a GPU is required to run the clustering pipelines.
+`uv sync` creates `.venv/` at the repo root and resolves everything from
+`pyproject.toml`. PyTorch is fetched from the PyTorch CUDA 12.4 index
+automatically — no separate install step needed.
 
 ---
 
 ## Hold'em Abstraction Pipeline
 
-### 1. Build the C++ Extension
+### 1. Build the C++ Extensions
 
-From the `src/` directory:
-
-```bash
-cd src
-pip install -e . --no-build-isolation
-```
-
-Or via Make:
+CMake fetches all C++ dependencies (pybind11, hand-isomorphism, OMPEval,
+GoogleTest) automatically on first configure. An internet connection is
+required the first time; subsequent builds use the cached `build/_deps/`.
 
 ```bash
 cd src
-make          # equivalent to pip install -e . --no-build-isolation
-make clean    # remove build artifacts
+make          # configure + build hand_indexer and deepcfr
+make clean    # remove build/ artifacts and .so files
+make clean-hard  # also remove clusters/
 ```
 
-This compiles the `hand_indexer` PyBind11 module, which wraps:
-- `RiverExpander` — equity vector + per-state EHS + multiplicity computation via OMPEval
-- `TurnExpander` — wide-bucket histogram + per-state EHS + multiplicity computation
-- `FlopExpander` — wide-bucket histogram + per-state EHS + multiplicity computation
-- `PreflopIndexer`, `RiverIndexer`, `TurnIndexer`, `FlopIndexer` — isomorphic hand indexing via hand-isomorphism
+This compiles two pybind11 modules:
+
+- **`hand_indexer`** — wraps `RiverExpander`, `TurnExpander`, `FlopExpander`,
+  and the isomorphic hand indexers (hand-isomorphism + OMPEval).
+- **`deepcfr`** — wraps the C++ DeepCFR traversal engine, reservoir sampling,
+  and the inference scheduler.
 
 ### 2. Run the Pipelines
 
-Pipelines must run in order. Each stage depends on output files from the previous stage.
+Pipelines must run in order. Each stage depends on output files from the
+previous stage.
 
 ```bash
 cd src
 
 # Stage 1: River (2.4B states → 8,192 clusters)
-python pysrc/river_cluster_pipeline.py
-python pysrc/river_visualize_labels.py
+uv run python pysrc/clustering/river_cluster_pipeline.py
+uv run python pysrc/clustering/river_visualize_labels.py
 
 # Stage 2: Turn (~55M states → 8,192 clusters)
-python pysrc/turn_cluster_pipeline.py
-python pysrc/turn_visualize_labels.py
+uv run python pysrc/clustering/turn_cluster_pipeline.py
+uv run python pysrc/clustering/turn_visualize_labels.py
 
 # Stage 3: Flop (1.29M states → 2,048 clusters)
-python pysrc/flop_cluster_pipeline.py
-python pysrc/flop_visualize_labels.py
+uv run python pysrc/clustering/flop_cluster_pipeline.py
+uv run python pysrc/clustering/flop_visualize_labels.py
 
 # Stage 4: Preflop (169 canonical classes → EHS values)
-python pysrc/preflop_ehs_pipeline.py
-python pysrc/preflop_ehs_visualize.py
+uv run python pysrc/clustering/preflop_ehs_pipeline.py
+uv run python pysrc/clustering/preflop_ehs_visualize.py
 ```
 
 ### Pipeline Parameters
@@ -98,9 +92,9 @@ python pysrc/preflop_ehs_visualize.py
 Each pipeline accepts flags to override defaults:
 
 ```bash
-python pysrc/river_cluster_pipeline.py -k 8192 --sample-size 20000000 -i 25 -t 16
-python pysrc/turn_cluster_pipeline.py  -k 8192 --sample-size 10000000 -i 25 -t 16
-python pysrc/flop_cluster_pipeline.py  -k 2048 -i 25 -t 16
+uv run python pysrc/clustering/river_cluster_pipeline.py -k 8192 --sample-size 20000000 -i 25 -t 16
+uv run python pysrc/clustering/turn_cluster_pipeline.py  -k 8192 --sample-size 10000000 -i 25 -t 16
+uv run python pysrc/clustering/flop_cluster_pipeline.py  -k 2048 -i 25 -t 16
 ```
 
 | Flag | River | Turn | Flop | Description |
@@ -148,26 +142,14 @@ src/clusters/
 
 ## Evaluation
 
-### Installing OpenSpiel
-
-OpenSpiel is required only to run the match evaluation pipeline (`src/pysrc/evaluation/`). It is installed automatically via conda:
-
-```bash
-conda env create -f environment.yml   # open_spiel is in the pip section
-conda activate tiltstack
-```
-
-Or manually if the environment already exists:
-
-```bash
-pip install open_spiel
-```
-
-OpenSpiel wheels are pre-built for Python 3.11 on Linux x86_64. If you encounter a build-from-source fallback, verify your Python version and OS.
+OpenSpiel is required only to run the match evaluation pipeline
+(`src/pysrc/evaluation/`). It is included in the core dependencies and
+installed by `uv sync`.
 
 ### Configuring the Game
 
-The evaluation uses OpenSpiel's `universal_poker` game engine with parameters matched to the training setup:
+The evaluation uses OpenSpiel's `universal_poker` game engine with parameters
+matched to the training setup:
 
 | Parameter | Value | Notes |
 |-----------|:-----:|-------|
@@ -189,7 +171,7 @@ game = pyspiel.load_game(
 
 ```bash
 cd src
-python pysrc/evaluation/match_runner.py \
+uv run python pysrc/evaluation/match_runner.py \
     --strat-net  ../checkpoints/policy0050.pt \
     --br-net0    ../br_checkpoints/br_adv0_0040.pt \
     --br-net1    ../br_checkpoints/br_adv1_0040.pt \
@@ -197,7 +179,8 @@ python pysrc/evaluation/match_runner.py \
     --num-games  10000
 ```
 
-The script reports P0 win rate in chips/hand. Run duplicate matches (swap seats) to cancel out deal variance.
+The script reports P0 win rate in chips/hand. Run duplicate matches (swap
+seats) to cancel out deal variance.
 
 ---
 
@@ -207,35 +190,65 @@ The script reports P0 win rate in chips/hand. Run duplicate matches (swap seats)
 
 ```bash
 cd demos/kuhn
-python Kuhn.py
+uv run python Kuhn.py
 ```
 
-Runs 1,000 iterations of vanilla CFR on 3-card Kuhn Poker and displays interactive convergence plots on 2D strategy simplices. Requires only `numpy` and `matplotlib`.
+Runs 1,000 iterations of vanilla CFR on 3-card Kuhn Poker and displays
+interactive convergence plots on 2D strategy simplices. Requires only
+`numpy` and `matplotlib`.
 
 ### Leduc Hold'em CFR+ Solver
 
 ```bash
 cd demos/leduc
-make install   # install pybind11 + setuptools
-make build     # compile C++ extension (requires C++20)
+make install   # uv sync --extra demos
+make build     # configure + compile C++ extension via CMake
 make test      # train for 100k iterations
-make best      # compute best response / exploitability
 ```
 
-See [LEDUC.md](LEDUC.md) and [LEDUC_IMPLEMENTATION.md](LEDUC_IMPLEMENTATION.md) for details.
+See [LEDUC.md](LEDUC.md) and [LEDUC_IMPLEMENTATION.md](LEDUC_IMPLEMENTATION.md)
+for details.
+
+---
+
+## Code Style
+
+Both C++ and Python formatting are driven by a single Make target from `src/`:
+
+```bash
+make tidy
+```
+
+This runs `clang-format` over all `.h`/`.cpp` files and `ruff format` over
+`pysrc/`.
 
 ---
 
 ## Troubleshooting
 
 **`ModuleNotFoundError: No module named 'hand_indexer'`**
-Run `pip install -e . --no-build-isolation` from the `src/` directory and make sure your conda environment is active.
+Run `make` from `src/` and make sure you are running Python via
+`uv run python` (not the system or conda Python).
+
+**`ModuleNotFoundError: No module named 'faiss'`**
+You are running the system Python instead of the uv venv. Use
+`uv run python <script>` or activate the venv with
+`source .venv/bin/activate`.
 
 **`faiss.GpuIndexFlatL1` or GPU errors**
-Verify CUDA is available: `python -c "import faiss; print(faiss.get_num_gpus())"`. If it returns 0, check your CUDA installation or switch to `faiss-cpu`.
+Verify CUDA is available: `uv run python -c "import faiss; print(faiss.get_num_gpus())"`.
+If it returns 0, check your CUDA driver version (requires CUDA 12.4+).
 
-**OpenMP not found during build**
-Install `libomp-dev` (Ubuntu) or `libgomp-devel` (RHEL). On macOS, install via `brew install libomp`.
+**CMake cannot find Python**
+CMake is picking up a system or conda Python. The `src/Makefile` passes
+`-DPython_EXECUTABLE` automatically via `uv run python`. If invoking CMake
+directly, pass it manually:
+```bash
+cmake -S src -B src/build -DPython_EXECUTABLE=$(uv run python -c "import sys; print(sys.executable)")
+```
+
+**OpenMP not found during CMake configure**
+Install `libgomp-devel` (RHEL) or `libomp-dev` (Ubuntu).
 
 **C++ compiler errors (Leduc solver)**
-The Leduc solver requires C++20. Verify with `g++ --version` (needs g++ 10+) or `clang++ --version` (needs clang 12+).
+The Leduc solver requires C++20. Verify with `g++ --version` (needs g++ 10+).

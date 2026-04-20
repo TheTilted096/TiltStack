@@ -30,10 +30,12 @@
 
 // Include OMPEval before hand-isomorphism: deck.h defines CARDS/RANKS/SUITS
 // macros that collide with OMPEval identifiers.
-#include "../../third_party/OMPEval/HandEvaluator.h"
+#include "HandEvaluator.h"
 
 extern "C" {
-#include "../../third_party/hand-isomorphism/hand_index.h"
+#define _Bool bool
+#include "hand_index.h"
+#undef _Bool
 }
 
 #include <cstdint>

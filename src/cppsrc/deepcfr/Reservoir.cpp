@@ -2,8 +2,8 @@
 #include <algorithm>
 #include <cstring>
 
-Reservoir::Reservoir(std::size_t capacity, int numThreads,
-                     uint8_t* inputBuf, float* targetBuf, int32_t* weightBuf)
+Reservoir::Reservoir(std::size_t capacity, int numThreads, uint8_t *inputBuf,
+                     float *targetBuf, int32_t *weightBuf)
     : capacity_(capacity), numThreads_(numThreads),
       sliceSize_(capacity / static_cast<std::size_t>(numThreads)),
       inputBuf_(inputBuf), targetBuf_(targetBuf), weightBuf_(weightBuf),
@@ -14,9 +14,8 @@ Reservoir::Reservoir(std::size_t capacity, int numThreads,
     // sliceSize/(sliceSize+1) rather than sliceSize/1 >> 1.
     for (int i = 0; i < numThreads; ++i) {
         const std::size_t sliceStart = static_cast<std::size_t>(i) * sliceSize_;
-        seenPerThread_[i].value = (i == numThreads - 1)
-            ? capacity_ - sliceStart
-            : sliceSize_;
+        seenPerThread_[i].value =
+            (i == numThreads - 1) ? capacity_ - sliceStart : sliceSize_;
     }
 }
 
@@ -24,27 +23,23 @@ std::size_t Reservoir::size() const {
     return std::min(nSeen.load(std::memory_order_relaxed), capacity_);
 }
 
-void Reservoir::writeSlot(std::size_t dst,
-                           const uint8_t*  inputBase,
-                           const float*    targetBase,
-                           const int32_t*  weightBase,
-                           std::size_t     bIdx) {
-    std::memcpy(inputBuf_  + dst  * sizeof(InfoSet),
-                inputBase  + bIdx * sizeof(InfoSet),
-                sizeof(InfoSet));
-    std::memcpy(targetBuf_ + dst  * NUM_ACTIONS,
-                targetBase + bIdx * NUM_ACTIONS,
+void Reservoir::writeSlot(std::size_t dst, const uint8_t *inputBase,
+                          const float *targetBase, const int32_t *weightBase,
+                          std::size_t bIdx) {
+    std::memcpy(inputBuf_ + dst * sizeof(InfoSet),
+                inputBase + bIdx * sizeof(InfoSet), sizeof(InfoSet));
+    std::memcpy(targetBuf_ + dst * NUM_ACTIONS, targetBase + bIdx * NUM_ACTIONS,
                 NUM_ACTIONS * sizeof(float));
     if (weightBuf_ && weightBase)
         weightBuf_[dst] = weightBase[bIdx];
 }
 
-void Reservoir::insert(int threadID,
-                        const std::vector<InfoSet>& inputs,
-                        const std::vector<Regrets>& targets,
-                        const std::vector<int32_t>* weights) {
+void Reservoir::insert(int threadID, const std::vector<InfoSet> &inputs,
+                       const std::vector<Regrets> &targets,
+                       const std::vector<int32_t> *weights) {
     const std::size_t B = inputs.size();
-    if (B == 0) return;
+    if (B == 0)
+        return;
 
     // Atomically claim a contiguous range of global stream positions.
     // This is the sole shared operation; all writes below are either to
@@ -52,9 +47,9 @@ void Reservoir::insert(int threadID,
     // (phase 2), so no further synchronisation is needed.
     const std::size_t base = nSeen.fetch_add(B, std::memory_order_relaxed);
 
-    const uint8_t*  inData  = reinterpret_cast<const uint8_t*>(inputs.data());
-    const float*    tgtData = reinterpret_cast<const float*>(targets.data());
-    const int32_t*  wgtData = weights ? weights->data() : nullptr;
+    const uint8_t *inData = reinterpret_cast<const uint8_t *>(inputs.data());
+    const float *tgtData = reinterpret_cast<const float *>(targets.data());
+    const int32_t *wgtData = weights ? weights->data() : nullptr;
 
     // ---- Phase 1: fill empty slots directly --------------------------------
     // Slots [base, fillEnd) are uniquely owned by this call — no other
@@ -77,10 +72,11 @@ void Reservoir::insert(int threadID,
     // local stream position for the acceptance probability calculation.
     // Uses the thread_local xorshift64* RNG from CFRUtils.h, already seeded
     // per-thread by the Orchestrator.
-    
-    const std::size_t sliceStart = static_cast<std::size_t>(threadID) * sliceSize_;
-    const std::size_t sliceSize  = (threadID == numThreads_ - 1)
-        ? capacity_ - sliceStart : sliceSize_;
+
+    const std::size_t sliceStart =
+        static_cast<std::size_t>(threadID) * sliceSize_;
+    const std::size_t sliceSize =
+        (threadID == numThreads_ - 1) ? capacity_ - sliceStart : sliceSize_;
 
     const std::size_t localBase = seenPerThread_[threadID].value;
     seenPerThread_[threadID].value += B;

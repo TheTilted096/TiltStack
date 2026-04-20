@@ -38,16 +38,18 @@ import numpy as np
 # Public library API
 # ---------------------------------------------------------------------------
 
+
 def gpu_available() -> bool:
     """Check whether FAISS GPU support is installed and a GPU is visible."""
     try:
-        return hasattr(faiss, 'StandardGpuResources') and faiss.get_num_gpus() > 0
+        return hasattr(faiss, "StandardGpuResources") and faiss.get_num_gpus() > 0
     except Exception:
         return False
 
 
-def train_flop_centroids(sample: np.ndarray, k: int, niter: int,
-                         seed: int) -> np.ndarray:
+def train_flop_centroids(
+    sample: np.ndarray, k: int, niter: int, seed: int
+) -> np.ndarray:
     """Train K-means centroids on float32 CDF vectors with L1 distance on GPU.
 
     Args:
@@ -61,18 +63,21 @@ def train_flop_centroids(sample: np.ndarray, k: int, niter: int,
         (k, 256) float32 centroid matrix (CDF vectors, values in [0, 47], unsorted).
     """
     d = sample.shape[1]
-    print(f"Training K={k:,} flop centroids, {niter} iterations on GPU "
-          f"({sample.shape[0]:,} x {d} vectors, L1)...", file=sys.stderr)
+    print(
+        f"Training K={k:,} flop centroids, {niter} iterations on GPU "
+        f"({sample.shape[0]:,} x {d} vectors, L1)...",
+        file=sys.stderr,
+    )
 
     clus = faiss.Clustering(d, k)
-    clus.niter   = niter
+    clus.niter = niter
     clus.verbose = True
-    clus.seed    = seed
+    clus.seed = seed
     clus.max_points_per_centroid = sample.shape[0] // k + 1
 
     cpu_index = faiss.IndexFlat(d, faiss.METRIC_L1)
-    res       = faiss.StandardGpuResources()
-    index     = faiss.index_cpu_to_gpu(res, 0, cpu_index)
+    res = faiss.StandardGpuResources()
+    index = faiss.index_cpu_to_gpu(res, 0, cpu_index)
 
     t0 = time.time()
     clus.train(sample, index)
@@ -80,8 +85,9 @@ def train_flop_centroids(sample: np.ndarray, k: int, niter: int,
     return faiss.vector_to_array(clus.centroids).reshape(k, d).copy()
 
 
-def assign_flop_labels(all_cdfs: np.ndarray, centroids: np.ndarray,
-                       out_path: str) -> np.ndarray:
+def assign_flop_labels(
+    all_cdfs: np.ndarray, centroids: np.ndarray, out_path: str
+) -> np.ndarray:
     """Assign flop cluster labels to all states via GPU search.
 
     All 1,286,792 CDF vectors are already in RAM, so no streaming is needed.
@@ -101,7 +107,7 @@ def assign_flop_labels(all_cdfs: np.ndarray, centroids: np.ndarray,
 
     cpu_index = faiss.IndexFlat(d, faiss.METRIC_L1)
     cpu_index.add(centroids)
-    res   = faiss.StandardGpuResources()
+    res = faiss.StandardGpuResources()
     index = faiss.index_cpu_to_gpu(res, 0, cpu_index)
 
     total = all_cdfs.shape[0]
@@ -111,12 +117,15 @@ def assign_flop_labels(all_cdfs: np.ndarray, centroids: np.ndarray,
     _, labels = index.search(all_cdfs, 1)
     labels = labels.ravel().astype(np.uint16)
 
-    with open(out_path, 'wb') as f:
+    with open(out_path, "wb") as f:
         f.write(labels.tobytes())
 
     elapsed = time.time() - t0
-    print(f"Assignment done: {total:,} vectors in {elapsed:.1f}s "
-          f"({total / elapsed / 1e6:.1f}M vec/s)", file=sys.stderr)
+    print(
+        f"Assignment done: {total:,} vectors in {elapsed:.1f}s "
+        f"({total / elapsed / 1e6:.1f}M vec/s)",
+        file=sys.stderr,
+    )
     return labels
 
 

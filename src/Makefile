@@ -3,83 +3,61 @@
 #
 #  Targets
 #  -------
-#    make hand_indexer   Build the hand_indexer pybind11 module and copy to pysrc/
-#    make deepcfr        Build the deepcfr pybind11 module and copy to pysrc/
+#    make hand_indexer   Build the hand_indexer pybind11 module
+#    make deepcfr        Build the deepcfr pybind11 module
 #    make all            Build both modules (default)
-#    make test           Compile and run C++ unit tests
+#    make test           Compile and run C++ unit tests via CTest
 #    make clean          Remove build/ artifacts and pysrc/ .so files
 #    make clean-hard     Also remove clusters/
 #
 #  Quick-start
 #  -----------
 #    cd src/
-#    make                              # builds hand_indexer + deepcfr
-#    python pysrc/NLHE_Trainer.py      # pilot run (default: 20 iterations)
+#    make                              # configures + builds hand_indexer + deepcfr
+#    uv run python pysrc/NLHE_Trainer.py
 #
-#  Smoke-test (fast sanity check before a full run)
-#    python pysrc/NLHE_Trainer.py \
+#  Smoke-test
+#    uv run python pysrc/NLHE_Trainer.py \
 #        --iterations 1 --threads 1 --total-samples 10000 \
 #        --clusters-dir clusters
 #
 #  Clustering pipeline (run once; outputs go to clusters/)
-#    python pysrc/preflop_ehs_pipeline.py
-#    python pysrc/flop_cluster_pipeline.py
-#    python pysrc/turn_cluster_pipeline.py
-#    python pysrc/river_cluster_pipeline.py
+#    uv run python pysrc/preflop_ehs_pipeline.py
+#    uv run python pysrc/flop_cluster_pipeline.py
+#    uv run python pysrc/turn_cluster_pipeline.py
+#    uv run python pysrc/river_cluster_pipeline.py
 # ---------------------------------------------------------------------------
 
-PYTHON      = python3
-MKDIR_BUILD = mkdir -p build
+BUILD_DIR  = build
+PYTHON_EXE := $(shell uv run python -c "import sys; print(sys.executable)")
 
-# GTest headers and libs (provided by the active conda environment).
-GTEST_INC = $(CONDA_PREFIX)/include
-GTEST_LIB = $(CONDA_PREFIX)/lib
-
-.PHONY: all hand_indexer deepcfr test clean clean-hard
+.PHONY: all hand_indexer deepcfr test clean clean-hard tidy
 
 all: hand_indexer deepcfr
 
-hand_indexer: | build
-	$(PYTHON) setup.py build_ext --build-lib=build --build-temp=build/temp
-	cp -f build/hand_indexer*.so pysrc/clustering/
+$(BUILD_DIR)/CMakeCache.txt:
+	cmake -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release \
+	    -DPython_EXECUTABLE=$(PYTHON_EXE) \
+	    -DPython3_EXECUTABLE=$(PYTHON_EXE)
 
-deepcfr: | build
-	$(PYTHON) setup_deepcfr.py build_ext --build-lib=build --build-temp=build/temp
-	cp -f build/deepcfr*.so pysrc/deepcfr/
+hand_indexer: $(BUILD_DIR)/CMakeCache.txt
+	cmake --build $(BUILD_DIR) --target hand_indexer
 
-test: | build
-	gcc -O2 \
-	    -I third_party/hand-isomorphism \
-	    -c third_party/hand-isomorphism/hand_index.c -o build/hand_index.o
-	gcc -O2 \
-	    -I third_party/hand-isomorphism \
-	    -c third_party/hand-isomorphism/deck.c -o build/deck.o
-	g++ -std=c++20 -O2 \
-	    $(wildcard cppsrc/test/*.cpp) \
-	    cppsrc/deepcfr/CFRGame.cpp \
-	    cppsrc/deepcfr/DeepCFR.cpp \
-	    cppsrc/deepcfr/Scheduler.cpp \
-	    third_party/OMPEval/HandEvaluator.cpp \
-	    build/hand_index.o build/deck.o \
-	    -I cppsrc/deepcfr \
-	    -I third_party/OMPEval \
-	    -I third_party/hand-isomorphism \
-	    -I $(GTEST_INC) \
-	    -L $(GTEST_LIB) -lgtest -lgtest_main -lpthread \
-	    -Wl,-rpath,$(GTEST_LIB) \
-	    -o build/cfr_tests
-	./build/cfr_tests
+deepcfr: $(BUILD_DIR)/CMakeCache.txt
+	cmake --build $(BUILD_DIR) --target deepcfr
 
-build:
-	$(MKDIR_BUILD)
+test: $(BUILD_DIR)/CMakeCache.txt
+	cmake --build $(BUILD_DIR) --target cfr_tests
+	ctest --test-dir $(BUILD_DIR) --output-on-failure
 
 tidy:
 	find . -name "*.h"   -exec clang-format -i -style="{BasedOnStyle: llvm, IndentWidth: 4}" {} +
 	find . -name "*.cpp" -exec clang-format -i -style="{BasedOnStyle: llvm, IndentWidth: 4}" {} +
+	uv run ruff format pysrc/
 
 # ---------------------------------------------------------------------------
 clean:
-	rm -rf build runs *.egg-info pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*
+	rm -rf $(BUILD_DIR) pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*
 
 clean-hard:
-	rm -rf build runs clusters checkpoints br_checkpoints *.egg-info pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*
+	rm -rf $(BUILD_DIR) runs .ruff_cache clusters checkpoints br_checkpoints pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*

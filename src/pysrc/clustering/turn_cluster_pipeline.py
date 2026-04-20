@@ -47,49 +47,63 @@ from pathlib import Path
 import numpy as np
 
 import hand_indexer
-from turn_clusterer import (assign_turn_labels_and_ehs_fine_streaming,
-                             gpu_available, remap_labels_inplace,
-                             train_turn_centroids)
+from turn_clusterer import (
+    assign_turn_labels_and_ehs_fine_streaming,
+    gpu_available,
+    remap_labels_inplace,
+    train_turn_centroids,
+)
 
 # ---------------------------------------------------------------------------
 # Fixed paths
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR   = Path(__file__).parent.parent.parent / "clusters"
-RIVER_LABELS_PATH     = OUTPUT_DIR / "river_labels.bin"
-RIVER_EHS_FINE_PATH   = OUTPUT_DIR / "river_ehs_fine.bin"
-INDICES_PATH          = OUTPUT_DIR / "turn_sample_indices.bin"
-SAMPLE_PATH           = OUTPUT_DIR / "turn_sample.npy"
-CENTROIDS_PATH        = OUTPUT_DIR / "turn_centroids.npy"
-EHS_PATH              = OUTPUT_DIR / "turn_ehs.bin"
-EHS_FINE_PATH         = OUTPUT_DIR / "turn_ehs_fine.bin"
-LABELS_PATH           = OUTPUT_DIR / "turn_labels.bin"
-CLUSTER_EHS_PATH      = OUTPUT_DIR / "turn_cluster_ehs_accum.npy"  # temp
+OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
+RIVER_LABELS_PATH = OUTPUT_DIR / "river_labels.bin"
+RIVER_EHS_FINE_PATH = OUTPUT_DIR / "river_ehs_fine.bin"
+INDICES_PATH = OUTPUT_DIR / "turn_sample_indices.bin"
+SAMPLE_PATH = OUTPUT_DIR / "turn_sample.npy"
+CENTROIDS_PATH = OUTPUT_DIR / "turn_centroids.npy"
+EHS_PATH = OUTPUT_DIR / "turn_ehs.bin"
+EHS_FINE_PATH = OUTPUT_DIR / "turn_ehs_fine.bin"
+LABELS_PATH = OUTPUT_DIR / "turn_labels.bin"
+CLUSTER_EHS_PATH = OUTPUT_DIR / "turn_cluster_ehs_accum.npy"  # temp
 
 
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
 
+
 class TurnClusterPipeline:
     """Orchestrates the turn clustering pipeline."""
 
-    def __init__(self, k: int, sample_size: int, niter: int,
-                 seed: int, threads: int, verbose: bool = True):
-        self.k           = k
+    def __init__(
+        self,
+        k: int,
+        sample_size: int,
+        niter: int,
+        seed: int,
+        threads: int,
+        verbose: bool = True,
+    ):
+        self.k = k
         self.sample_size = sample_size
-        self.niter       = niter
-        self.seed        = seed
-        self.threads     = threads
-        self.verbose     = verbose
+        self.niter = niter
+        self.seed = seed
+        self.threads = threads
+        self.verbose = verbose
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-        for path, name in [(RIVER_LABELS_PATH,   "river_labels.bin"),
-                           (RIVER_EHS_FINE_PATH, "river_ehs_fine.bin")]:
+        for path, name in [
+            (RIVER_LABELS_PATH, "river_labels.bin"),
+            (RIVER_EHS_FINE_PATH, "river_ehs_fine.bin"),
+        ]:
             if not path.exists():
                 raise FileNotFoundError(
                     f"{name} not found at {path}. "
-                    "Run the river clustering pipeline first.")
+                    "Run the river clustering pipeline first."
+                )
 
     def log(self, msg: str):
         if self.verbose:
@@ -100,10 +114,13 @@ class TurnClusterPipeline:
             os.environ[var] = str(self.threads)
 
     def _make_expander(self):
-        self.log("  Loading river_labels.bin (~4.9 GB) and "
-                 "river_ehs_fine.bin (~4.65 GB) into RAM...")
-        return hand_indexer.TurnExpander(str(RIVER_LABELS_PATH),
-                                         str(RIVER_EHS_FINE_PATH))
+        self.log(
+            "  Loading river_labels.bin (~4.9 GB) and "
+            "river_ehs_fine.bin (~4.65 GB) into RAM..."
+        )
+        return hand_indexer.TurnExpander(
+            str(RIVER_LABELS_PATH), str(RIVER_EHS_FINE_PATH)
+        )
 
     # ------------------------------------------------------------------
     # Pipeline steps
@@ -116,19 +133,21 @@ class TurnClusterPipeline:
             return
 
         self.log(f"==> Step 1/5: Sampling {self.sample_size:,} indices...")
-        t0  = time.time()
+        t0 = time.time()
         expander = self._make_expander()
         num_states = expander.num_states()
         self.log(f"  Turn states: {num_states:,}")
 
-        rng     = np.random.default_rng(self.seed)
+        rng = np.random.default_rng(self.seed)
         indices = np.sort(
             rng.choice(num_states, size=self.sample_size, replace=False)
         ).astype(np.uint64)
         indices.tofile(INDICES_PATH)
-        self.log(f"  {self.sample_size:,} indices written "
-                 f"({INDICES_PATH.stat().st_size / 1e6:.1f} MB, "
-                 f"{time.time() - t0:.1f}s)")
+        self.log(
+            f"  {self.sample_size:,} indices written "
+            f"({INDICES_PATH.stat().st_size / 1e6:.1f} MB, "
+            f"{time.time() - t0:.1f}s)"
+        )
 
     def step_compute_sample(self):
         """Compute wide-bucket CDF vectors for the sampled indices."""
@@ -136,17 +155,20 @@ class TurnClusterPipeline:
             self.log("Sample already exists, skipping computation.")
             return
 
-        self.log(f"==> Step 2/5: Computing CDF vectors for "
-                 f"{self.sample_size:,} samples...")
+        self.log(
+            f"==> Step 2/5: Computing CDF vectors for {self.sample_size:,} samples..."
+        )
         self._set_thread_env()
         expander = self._make_expander()
-        indices  = np.fromfile(INDICES_PATH, dtype=np.uint64)
-        t0       = time.time()
+        indices = np.fromfile(INDICES_PATH, dtype=np.uint64)
+        t0 = time.time()
 
         sample = np.cumsum(expander.compute_sample(indices).astype(np.float32), axis=1)
         np.save(SAMPLE_PATH, sample)
-        self.log(f"  Sample: {sample.shape[0]:,} x {sample.shape[1]}  "
-                 f"({sample.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)")
+        self.log(
+            f"  Sample: {sample.shape[0]:,} x {sample.shape[1]}  "
+            f"({sample.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)"
+        )
 
     def step_train_centroids(self):
         """Train K-means centroids (L1) on the saved sample (unsorted)."""
@@ -154,31 +176,45 @@ class TurnClusterPipeline:
             self.log("Centroids already exist, skipping training.")
             return
 
-        self.log(f"==> Step 3/5: Training K={self.k:,} centroids "
-                 f"({self.niter} iterations, L1)...")
-        sample    = np.load(SAMPLE_PATH)
+        self.log(
+            f"==> Step 3/5: Training K={self.k:,} centroids "
+            f"({self.niter} iterations, L1)..."
+        )
+        sample = np.load(SAMPLE_PATH)
         centroids = train_turn_centroids(sample, self.k, self.niter, self.seed)
         np.save(CENTROIDS_PATH, centroids)
         self.log(f"  Centroids saved: {CENTROIDS_PATH}")
 
     def step_assign_labels_and_ehs_fine(self):
         """Stream all turn states in a single pass: assign labels and compute EHS fine."""
-        if LABELS_PATH.exists() and EHS_FINE_PATH.exists() and CLUSTER_EHS_PATH.exists():
+        if (
+            LABELS_PATH.exists()
+            and EHS_FINE_PATH.exists()
+            and CLUSTER_EHS_PATH.exists()
+        ):
             self.log("Labels and EHS fine already exist, skipping.")
             return
 
-        self.log("==> Step 4/5: Assigning labels and computing EHS fine (single pass)...")
+        self.log(
+            "==> Step 4/5: Assigning labels and computing EHS fine (single pass)..."
+        )
         self._set_thread_env()
-        expander  = self._make_expander()
+        expander = self._make_expander()
         centroids = np.load(CENTROIDS_PATH)
         per_cluster_ehs = assign_turn_labels_and_ehs_fine_streaming(
-            expander, centroids, str(LABELS_PATH), str(EHS_FINE_PATH),
-            batch_size=3_000_000)
+            expander,
+            centroids,
+            str(LABELS_PATH),
+            str(EHS_FINE_PATH),
+            batch_size=3_000_000,
+        )
         np.save(CLUSTER_EHS_PATH, per_cluster_ehs)
         self.log(f"  Labels saved: {LABELS_PATH}")
         self.log(f"  EHS fine saved: {EHS_FINE_PATH}")
-        self.log(f"  Per-cluster EHS range: "
-                 f"[{per_cluster_ehs.min():.4f}, {per_cluster_ehs.max():.4f}]")
+        self.log(
+            f"  Per-cluster EHS range: "
+            f"[{per_cluster_ehs.min():.4f}, {per_cluster_ehs.max():.4f}]"
+        )
 
     def step_sort_by_true_ehs(self):
         """Sort centroids by weighted per-cluster EHS; remap labels; write turn_ehs.bin."""
@@ -187,11 +223,11 @@ class TurnClusterPipeline:
             return
 
         self.log("==> Step 5/5: Sorting by true EHS and remapping labels...")
-        centroids       = np.load(CENTROIDS_PATH)
+        centroids = np.load(CENTROIDS_PATH)
         per_cluster_ehs = np.load(CLUSTER_EHS_PATH)
 
         sort_order = np.argsort(per_cluster_ehs)
-        centroids  = centroids[sort_order]
+        centroids = centroids[sort_order]
         per_cluster_ehs[sort_order].astype(np.float32).tofile(EHS_PATH)
         np.save(CENTROIDS_PATH, centroids)
 
@@ -206,11 +242,15 @@ class TurnClusterPipeline:
     def run(self):
         """Execute the full pipeline."""
         if not gpu_available():
-            sys.exit("Error: No FAISS GPU support detected. A GPU is required to run this pipeline.")
+            sys.exit(
+                "Error: No FAISS GPU support detected. A GPU is required to run this pipeline."
+            )
         start = time.time()
         self.log("Starting turn clustering pipeline")
-        self.log(f"Parameters: K={self.k:,}, sample_size={self.sample_size:,}, "
-                 f"niter={self.niter}, threads={self.threads}")
+        self.log(
+            f"Parameters: K={self.k:,}, sample_size={self.sample_size:,}, "
+            f"niter={self.niter}, threads={self.threads}"
+        )
 
         self.step_generate_indices()
         self.step_compute_sample()
@@ -241,18 +281,32 @@ Examples:
   python turn_cluster_pipeline.py -k 8192 --sample-size 10000000 -t 16
         """,
     )
-    parser.add_argument("-k", "--clusters", type=int, default=8_192,
-                        help="Number of clusters (default: 8192)")
-    parser.add_argument("-s", "--sample-size", type=int, default=10_000_000,
-                        help="Training sample size (default: 10000000)")
-    parser.add_argument("-i", "--niter", type=int, default=25,
-                        help="K-means iterations (default: 25)")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Random seed (default: 42)")
-    parser.add_argument("-t", "--threads", type=int, default=16,
-                        help="OMP thread count (default: 16)")
-    parser.add_argument("-q", "--quiet", action="store_true",
-                        help="Suppress status messages")
+    parser.add_argument(
+        "-k",
+        "--clusters",
+        type=int,
+        default=8_192,
+        help="Number of clusters (default: 8192)",
+    )
+    parser.add_argument(
+        "-s",
+        "--sample-size",
+        type=int,
+        default=10_000_000,
+        help="Training sample size (default: 10000000)",
+    )
+    parser.add_argument(
+        "-i", "--niter", type=int, default=25, help="K-means iterations (default: 25)"
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed (default: 42)"
+    )
+    parser.add_argument(
+        "-t", "--threads", type=int, default=16, help="OMP thread count (default: 16)"
+    )
+    parser.add_argument(
+        "-q", "--quiet", action="store_true", help="Suppress status messages"
+    )
 
     args = parser.parse_args()
 

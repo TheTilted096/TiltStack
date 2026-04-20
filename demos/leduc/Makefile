@@ -1,27 +1,19 @@
-# Makefile for TiltStack
+BUILD_DIR = build
 
-ifeq ($(OS),Windows_NT)
-	SHELL := cmd.exe
-	PYTHON := py
-	COPY_MODULE := copy /Y build\*.pyd src\pysrc\ >nul 2>&1 || echo.
-	CLEAN := if exist build rmdir /S /Q build & del /Q src\pysrc\*.pyd 2>nul || echo. & if exist output rmdir /S /Q output
-else
-	PYTHON := python3
-	COPY_MODULE := cp -f build/*.so src/pysrc/
-	CLEAN := rm -rf build src/pysrc/*.so output
-endif
+.PHONY: build install test clean
+.DEFAULT_GOAL := build
 
-.PHONY: install build test clean
+$(BUILD_DIR)/CMakeCache.txt:
+	cmake -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release
 
-build:
-	$(PYTHON) setup.py build_ext --build-lib=build
-	$(COPY_MODULE)
+build: $(BUILD_DIR)/CMakeCache.txt
+	cmake --build $(BUILD_DIR) --target leducsolver
 
 install:
-	$(PYTHON) -m pip install pybind11
+	uv sync --extra demos
 
 test: build
-	$(PYTHON) src/pysrc/Leduc.py
+	uv run python src/pysrc/Leduc.py
 
 clean:
-	$(CLEAN)
+	rm -rf $(BUILD_DIR) src/pysrc/*.so output

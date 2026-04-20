@@ -3,11 +3,10 @@
 #include "CFRUtils.h"
 #include "DeepCFR.h"
 
-Orchestrator::Orchestrator(int numThreads,
-                           Reservoir* advRes0, Reservoir* advRes1,
-                           Reservoir* polRes, uint64_t seed)
-    : numThreads_(numThreads), seed_(seed),
-      advReservoirs_{advRes0, advRes1}, polReservoir_(polRes) {
+Orchestrator::Orchestrator(int numThreads, Reservoir *advRes0,
+                           Reservoir *advRes1, Reservoir *polRes, uint64_t seed)
+    : numThreads_(numThreads), seed_(seed), advReservoirs_{advRes0, advRes1},
+      polReservoir_(polRes) {
     // g_indexer is initialised by loadTables(), which callers must invoke
     // before constructing an Orchestrator.
 
@@ -39,8 +38,9 @@ void Orchestrator::startIteration(bool hero, int t, int totalSamples) {
         std::unique_lock lock(mtx_);
         currentHero_ = hero;
         currentT_ = t;
-        totalSamples_  = totalSamples;
-        nSeenAtStart_  = advReservoirs_[hero]->nSeen.load(std::memory_order_relaxed);
+        totalSamples_ = totalSamples;
+        nSeenAtStart_ =
+            advReservoirs_[hero]->nSeen.load(std::memory_order_relaxed);
         threadsActive_ = numThreads_;
         iterReady_ = true;
     }
@@ -101,7 +101,8 @@ void Orchestrator::runWorker(int threadIdx) {
             for (int i = 0; i < POOL_SIZE; i++) {
                 CFRGame g;
                 g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
-                sched.spawn(DeepCFR::rollout(std::move(g), currentHero_, currentT_, sched));
+                sched.spawn(DeepCFR::rollout(std::move(g), currentHero_,
+                                             currentT_, sched));
             }
 
             // Run until the sample quota is met and all active rollouts have
@@ -109,12 +110,13 @@ void Orchestrator::runWorker(int threadIdx) {
             while (sched.activeTasks() > 0) {
                 sched.runOneBatch();
                 int completed = sched.purgeCompleted();
-                if (sched.advReservoir->nSeen - nSeenAtStart_ < static_cast<std::size_t>(totalSamples_))
+                if (sched.advReservoir->nSeen - nSeenAtStart_ <
+                    static_cast<std::size_t>(totalSamples_))
                     for (int i = 0; i < completed; i++) {
                         CFRGame g;
                         g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
-                        sched.spawn(
-                            DeepCFR::rollout(std::move(g), currentHero_, currentT_, sched));
+                        sched.spawn(DeepCFR::rollout(std::move(g), currentHero_,
+                                                     currentT_, sched));
                     }
             }
         } catch (...) {
@@ -130,9 +132,12 @@ void Orchestrator::runWorker(int threadIdx) {
         // Flush any data accumulated after the last flushBatch() — rollouts
         // that completed without triggering another inference round.
         if (sched.advReservoir)
-            sched.advReservoir->insert(threadIdx, sched.advantageInputs, sched.advantageOutputs);
+            sched.advReservoir->insert(threadIdx, sched.advantageInputs,
+                                       sched.advantageOutputs);
         if (sched.polReservoir)
-            sched.polReservoir->insert(threadIdx, sched.policyInputs, sched.policyOutputs, &sched.policyWeights);
+            sched.polReservoir->insert(threadIdx, sched.policyInputs,
+                                       sched.policyOutputs,
+                                       &sched.policyWeights);
 
         // Always push the sentinel so Python's pop() loop is not left hanging,
         // regardless of whether the work block succeeded or threw.

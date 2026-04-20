@@ -12,18 +12,24 @@ from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
 
 
-def launch_tb(log_dir: Path, port: int = 6006,
-              reload_interval: int = 20) -> SummaryWriter:
+def launch_tb(
+    log_dir: Path, port: int = 6006, reload_interval: int = 20
+) -> SummaryWriter:
     """
     Launch TensorBoard pointed at log_dir.parent and return a SummaryWriter
     for log_dir.  The caller is responsible for calling writer.close() and
     for registering any cleanup handlers.
     """
     subprocess.Popen(
-        [Path(sys.executable).parent / "tensorboard",
-         "--logdir",          str(log_dir.parent),
-         "--port",            str(port),
-         "--reload_interval", str(reload_interval)],
+        [
+            Path(sys.executable).parent / "tensorboard",
+            "--logdir",
+            str(log_dir.parent),
+            "--port",
+            str(port),
+            "--reload_interval",
+            str(reload_interval),
+        ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,

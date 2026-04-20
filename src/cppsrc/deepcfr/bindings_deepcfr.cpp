@@ -73,35 +73,39 @@ PYBIND11_MODULE(deepcfr, m) {
         .def(py::init<>())
 
         // begin_with_cards(ss1, ss2, hero, cards) where cards is a list of 9
-        // card indices in [0,51], layout: [p0h0, p0h1, p1h0, p1h1, f0..f2, t, r].
-        // Unreached-street slots (turn/river when on flop) should be filled
+        // card indices in [0,51], layout: [p0h0, p0h1, p1h0, p1h1, f0..f2, t,
+        // r]. Unreached-street slots (turn/river when on flop) should be filled
         // with any unused card indices so hand_index_all can run cleanly;
         // their EHS/bucket values are gated by currentRound in get_info().
-        .def("begin_with_cards",
-             [](CFRGame &g, int ss1, int ss2, bool hero,
-                const std::vector<int> &cards) {
-                 if (cards.size() != 9)
-                     throw std::invalid_argument("cards must have exactly 9 elements");
-                 Card c[9];
-                 for (int i = 0; i < 9; i++)
-                     c[i] = static_cast<Card>(cards[i]);
-                 g.beginWithCards(ss1, ss2, hero, c);
-             },
-             py::arg("ss1"), py::arg("ss2"), py::arg("hero"), py::arg("cards"))
+        .def(
+            "begin_with_cards",
+            [](CFRGame &g, int ss1, int ss2, bool hero,
+               const std::vector<int> &cards) {
+                if (cards.size() != 9)
+                    throw std::invalid_argument(
+                        "cards must have exactly 9 elements");
+                Card c[9];
+                for (int i = 0; i < 9; i++)
+                    c[i] = static_cast<Card>(cards[i]);
+                g.beginWithCards(ss1, ss2, hero, c);
+            },
+            py::arg("ss1"), py::arg("ss2"), py::arg("hero"), py::arg("cards"))
 
         // make_move(action_int): action is an int matching the Action enum
         // (CHECK=0, CALL=1, BET50=2, BET100=3, ALLIN=4).
-        .def("make_move",
-             [](CFRGame &g, int a) { g.makeMove(static_cast<Action>(a)); },
-             py::arg("action"))
+        .def(
+            "make_move",
+            [](CFRGame &g, int a) { g.makeMove(static_cast<Action>(a)); },
+            py::arg("action"))
 
         // make_bet(amount_milli): apply a continuous bet given as a milli-chip
         // amount.  Records the nearest pot-fraction abstract action label
         // (CHECK/CALL/BET50/BET100/ALLIN) while updating financial state with
         // the exact amount provided.
-        .def("make_bet",
-             [](CFRGame &g, int amount_milli) { g.makeBet(amount_milli); },
-             py::arg("amount_milli"))
+        .def(
+            "make_bet",
+            [](CFRGame &g, int amount_milli) { g.makeBet(amount_milli); },
+            py::arg("amount_milli"))
 
         // generate_actions() -> list[int]: legal abstract action indices.
         .def("generate_actions",
@@ -128,20 +132,25 @@ PYBIND11_MODULE(deepcfr, m) {
              })
 
         // Read-only state accessors used by the agent for action mapping.
-        .def_property_readonly("pot",
-             [](const CFRGame &g) { return g.history[g.ply].pot; })
-        .def_property_readonly("to_call",
-             [](const CFRGame &g) { return g.history[g.ply].toCall; })
+        .def_property_readonly(
+            "pot", [](const CFRGame &g) { return g.history[g.ply].pot; })
+        .def_property_readonly(
+            "to_call", [](const CFRGame &g) { return g.history[g.ply].toCall; })
         .def_property_readonly("stm",
-             [](const CFRGame &g) { return static_cast<int>(g.history[g.ply].stm); })
-        .def_property_readonly("current_round",
-             [](const CFRGame &g) { return static_cast<int>(g.currentRound); })
+                               [](const CFRGame &g) {
+                                   return static_cast<int>(
+                                       g.history[g.ply].stm);
+                               })
+        .def_property_readonly(
+            "current_round",
+            [](const CFRGame &g) { return static_cast<int>(g.currentRound); })
         .def_property_readonly("stacks",
-             [](const CFRGame &g) {
-                 return std::vector<int>{g.stacks[0], g.stacks[1]};
-             })
-        .def_property_readonly("is_terminal",
-             [](const CFRGame &g) { return g.isTerminal != 0; });
+                               [](const CFRGame &g) {
+                                   return std::vector<int>{g.stacks[0],
+                                                           g.stacks[1]};
+                               })
+        .def_property_readonly(
+            "is_terminal", [](const CFRGame &g) { return g.isTerminal != 0; });
 
     // -------------------------------------------------------------------------
     // Scheduler
@@ -223,7 +232,7 @@ PYBIND11_MODULE(deepcfr, m) {
              [](py::object self) {
                  auto &s = self.cast<Scheduler &>();
                  return asArray1D<int>(s.policyWeightData(), s.policySize(),
-                                      self);
+                                       self);
              })
 
         // -- Rollout counter --------------------------------------------------
@@ -242,41 +251,41 @@ PYBIND11_MODULE(deepcfr, m) {
     py::class_<Reservoir>(m, "Reservoir")
         .def(py::init([](std::size_t capacity, int numThreads,
                          py::array_t<uint8_t, py::array::c_style> inputs,
-                         py::array_t<float,   py::array::c_style> targets,
+                         py::array_t<float, py::array::c_style> targets,
                          py::object weights) {
-                int32_t* wptr = nullptr;
-                if (!weights.is_none())
-                    wptr = weights.cast<
-                        py::array_t<int32_t, py::array::c_style>>()
-                        .mutable_data();
-                return new Reservoir(capacity, numThreads,
-                                     inputs.mutable_data(),
-                                     targets.mutable_data(),
-                                     wptr);
+                 int32_t *wptr = nullptr;
+                 if (!weights.is_none())
+                     wptr =
+                         weights
+                             .cast<py::array_t<int32_t, py::array::c_style>>()
+                             .mutable_data();
+                 return new Reservoir(capacity, numThreads,
+                                      inputs.mutable_data(),
+                                      targets.mutable_data(), wptr);
              }),
-             py::arg("capacity"), py::arg("num_threads"),
-             py::arg("inputs"), py::arg("targets"),
-             py::arg("weights") = py::none())
-        .def_property_readonly("n_seen", [](const Reservoir& r) {
-            return r.nSeen.load(std::memory_order_relaxed);
-        })
+             py::arg("capacity"), py::arg("num_threads"), py::arg("inputs"),
+             py::arg("targets"), py::arg("weights") = py::none())
+        .def_property_readonly("n_seen",
+                               [](const Reservoir &r) {
+                                   return r.nSeen.load(
+                                       std::memory_order_relaxed);
+                               })
         .def("size", &Reservoir::size);
 
     // -------------------------------------------------------------------------
     // Orchestrator
     // -------------------------------------------------------------------------
     py::class_<Orchestrator>(m, "Orchestrator")
-        .def(py::init([](int numThreads,
-                         Reservoir& advRes0, Reservoir& advRes1,
+        .def(py::init([](int numThreads, Reservoir &advRes0, Reservoir &advRes1,
                          py::object polResObj, uint64_t seed) {
-                Reservoir* polPtr = polResObj.is_none()
-                    ? nullptr : &polResObj.cast<Reservoir&>();
-                return new Orchestrator(numThreads,
-                                        &advRes0, &advRes1, polPtr, seed);
+                 Reservoir *polPtr = polResObj.is_none()
+                                         ? nullptr
+                                         : &polResObj.cast<Reservoir &>();
+                 return new Orchestrator(numThreads, &advRes0, &advRes1, polPtr,
+                                         seed);
              }),
              py::keep_alive<1, 2>(), py::keep_alive<1, 3>(),
-             py::arg("num_threads"),
-             py::arg("adv_res0"), py::arg("adv_res1"),
+             py::arg("num_threads"), py::arg("adv_res0"), py::arg("adv_res1"),
              py::arg("pol_res") = py::none(),
              py::arg("seed") = (uint64_t)0xdeadbeefcafe1234ULL)
 

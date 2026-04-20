@@ -25,7 +25,7 @@ import torch
 import pyspiel
 
 _EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_EVAL_DIR, '..', 'deepcfr'))
+sys.path.insert(0, os.path.join(_EVAL_DIR, "..", "deepcfr"))
 
 import deepcfr
 from tilt_agents import TiltStack_DeepCFR, load_net_auto
@@ -36,7 +36,7 @@ from network_training import DeepCFRNet, CONT_DIM, NUM_STREETS
 # ---------------------------------------------------------------------------
 
 OSP_BIG_BLIND = 100
-CHIPS_TO_MBB  = 1000 / OSP_BIG_BLIND   # = 10.0
+CHIPS_TO_MBB = 1000 / OSP_BIG_BLIND  # = 10.0
 
 GAME_STRING = (
     "universal_poker("
@@ -59,6 +59,7 @@ GAME_STRING = (
 # Match loop
 # ---------------------------------------------------------------------------
 
+
 def deal_cards() -> list:
     """Sample 9 distinct card indices (pre-flop through river) without replacement."""
     return np.random.permutation(52)[:9].tolist()
@@ -68,12 +69,12 @@ def play_match(game, bot0, bot1, cards: list) -> float:
     """
     Play one hand with a pre-dealt deck.  Returns Player 0's utility in chips.
     """
-    state    = game.new_initial_state()
+    state = game.new_initial_state()
     deal_idx = 0
 
     while not state.is_terminal():
         if state.is_chance_node():
-            action    = cards[deal_idx]
+            action = cards[deal_idx]
             deal_idx += 1
         else:
             current_player = state.current_player()
@@ -87,18 +88,30 @@ def play_match(game, bot0, bot1, cards: list) -> float:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
-    _clusters = os.path.join(_EVAL_DIR, '..', '..', 'clusters')
 
-    parser = argparse.ArgumentParser(description="TiltStack head-to-head network evaluation")
-    parser.add_argument('--p0',     required=True,
-                        help='Path to P0 strategy network checkpoint (policy*.pt)')
-    parser.add_argument('--p1',     required=True,
-                        help='Path to P1 strategy network checkpoint (policy*.pt)')
-    parser.add_argument('--pairs',  type=int, default=100_000,
-                        help='Number of duplicate pairs (each played twice, once per seat)')
-    parser.add_argument('--device', default='cpu',
-                        help='Torch device (cpu or cuda)')
+def main():
+    _clusters = os.path.join(_EVAL_DIR, "..", "..", "clusters")
+
+    parser = argparse.ArgumentParser(
+        description="TiltStack head-to-head network evaluation"
+    )
+    parser.add_argument(
+        "--p0",
+        required=True,
+        help="Path to P0 strategy network checkpoint (policy*.pt)",
+    )
+    parser.add_argument(
+        "--p1",
+        required=True,
+        help="Path to P1 strategy network checkpoint (policy*.pt)",
+    )
+    parser.add_argument(
+        "--pairs",
+        type=int,
+        default=100_000,
+        help="Number of duplicate pairs (each played twice, once per seat)",
+    )
+    parser.add_argument("--device", default="cpu", help="Torch device (cpu or cuda)")
     args = parser.parse_args()
 
     # 1. Load cluster tables
@@ -123,12 +136,12 @@ def main():
     #    Pass A: P0-net is SB (P0), P1-net is BB (P1) → payoff_a = P0-net's P0 utility
     #    Pass B: P1-net is SB (P0), P0-net is BB (P1) → payoff_b = P1-net's P0 utility
     #    P0-net's BB payoff = -payoff_b; combined per-pair edge = payoff_a - payoff_b.
-    sb_payoff    = 0.0
-    bb_payoff    = 0.0
-    pair_payoffs = []   # per-pair combined payoff for CI calculation
+    sb_payoff = 0.0
+    bb_payoff = 0.0
+    pair_payoffs = []  # per-pair combined payoff for CI calculation
 
     for i in range(args.pairs):
-        cards    = deal_cards()
+        cards = deal_cards()
         payoff_a = play_match(game, agent_p0, agent_p1, cards)
         payoff_b = play_match(game, agent_p1, agent_p0, cards)
         sb_payoff += payoff_a
@@ -138,22 +151,30 @@ def main():
         if (i + 1) % 1000 == 0:
             hands_so_far = (i + 1) * 2
             total_so_far = sb_payoff + bb_payoff
-            print(f"  [{i+1:6d}/{args.pairs}]  "
-                  f"P0 overall {total_so_far / hands_so_far * CHIPS_TO_MBB:+.1f}  "
-                  f"sb {sb_payoff / (i+1) * CHIPS_TO_MBB:+.1f}  "
-                  f"bb {bb_payoff / (i+1) * CHIPS_TO_MBB:+.1f}  mBB/hand")
+            print(
+                f"  [{i + 1:6d}/{args.pairs}]  "
+                f"P0 overall {total_so_far / hands_so_far * CHIPS_TO_MBB:+.1f}  "
+                f"sb {sb_payoff / (i + 1) * CHIPS_TO_MBB:+.1f}  "
+                f"bb {bb_payoff / (i + 1) * CHIPS_TO_MBB:+.1f}  mBB/hand"
+            )
 
     total_hands = args.pairs * 2
     overall_mbb = (sb_payoff + bb_payoff) / total_hands * CHIPS_TO_MBB
 
     per_hand = np.array(pair_payoffs) / 2.0 * CHIPS_TO_MBB
-    ci95     = 1.96 * per_hand.std(ddof=1) / np.sqrt(len(per_hand))
+    ci95 = 1.96 * per_hand.std(ddof=1) / np.sqrt(len(per_hand))
 
-    print(f"\n{'─'*60}")
+    print(f"\n{'─' * 60}")
     print(f"  Pairs played           : {args.pairs:,}  ({total_hands:,} hands total)")
-    print(f"  P0 edge as SB          : {sb_payoff / args.pairs * CHIPS_TO_MBB:+.2f} mBB/hand")
-    print(f"  P0 edge as BB          : {bb_payoff / args.pairs * CHIPS_TO_MBB:+.2f} mBB/hand")
-    print(f"  P0 overall edge vs P1  : {overall_mbb:+.2f} ± {ci95:.2f} mBB/hand  (95% CI)")
+    print(
+        f"  P0 edge as SB          : {sb_payoff / args.pairs * CHIPS_TO_MBB:+.2f} mBB/hand"
+    )
+    print(
+        f"  P0 edge as BB          : {bb_payoff / args.pairs * CHIPS_TO_MBB:+.2f} mBB/hand"
+    )
+    print(
+        f"  P0 overall edge vs P1  : {overall_mbb:+.2f} ± {ci95:.2f} mBB/hand  (95% CI)"
+    )
 
 
 if __name__ == "__main__":

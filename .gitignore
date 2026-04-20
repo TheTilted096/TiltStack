@@ -1,25 +1,28 @@
-# macOS metadata
-.DS_Store
-**/.DS_Store
-
 __pycache__/
 *.pyc
 
-# PyBind11 build artifacts
+# CMake / C++ build artifacts
 build/
 *.pyd
 *.so
 *.o
-checkpoints/
-br_checkpoints/
-saves/
+*.egg-info/
 
 # IDE configuration (machine-specific paths)
 .vscode/
+.DS_Store
+**/.DS_Store
+
+# uv virtual environment (lockfile uv.lock should be committed)
+.venv/
+
+# ruff cache
+.ruff_cache/
 
 # Solver output
 *.npy
 *.bin
-
-src/*.txt
+checkpoints/
+br_checkpoints/
+saves/
 runs/

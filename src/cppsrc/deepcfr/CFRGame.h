@@ -2,9 +2,11 @@
 #include "CFRUtils.h"
 // Include OMPEval before hand-isomorphism: deck.h defines CARDS/RANKS/SUITS
 // macros that collide with OMPEval identifiers.
-#include "../../third_party/OMPEval/HandEvaluator.h"
+#include "HandEvaluator.h"
 extern "C" {
-#include "../../third_party/hand-isomorphism/hand_index.h"
+#define _Bool bool
+#include "hand_index.h"
+#undef _Bool
 }
 
 // Single shared indexer for all CFRGame instances.  Initialized once before
@@ -31,8 +33,9 @@ class CFRGame {
     uint16_t streetBucket[NUM_ROUNDS][2];
     float streetEHS[NUM_ROUNDS][2];
     hand_index_t streetIDs[NUM_ROUNDS][2];
-    Card rawDeck[9]; // {p0h0, p0h1, p1h0, p1h1, f0, f1, f2, turn, river}
-    uint32_t betHistMask; // mirrors InfoSet::betHistMask; maintained by makeMove/makeBet/unmakeMove
+    Card rawDeck[9];      // {p0h0, p0h1, p1h0, p1h1, f0, f1, f2, turn, river}
+    uint32_t betHistMask; // mirrors InfoSet::betHistMask; maintained by
+                          // makeMove/makeBet/unmakeMove
 
     CFRGame();
     ~CFRGame() = default;
@@ -61,7 +64,8 @@ class CFRGame {
 
     // Apply a bet of amount_milli milli-chips.  The financial state is updated
     // with the exact amount; the recorded action label is the pot-fraction
-    // abstract action whose fraction is closest to amount_milli / (pot + toCall):
+    // abstract action whose fraction is closest to amount_milli / (pot +
+    // toCall):
     //   CHECK  — amount_milli == 0
     //   CALL   — amount_milli <= toCall
     //   BET50  — raise fraction < 0.75  (closer to 0.5× pot)
@@ -75,6 +79,7 @@ class CFRGame {
     void initState(int ss1, int ss2, bool h);
 
     // Index each player's 7-card hand and precompute EHS + cluster buckets for
-    // all streets.  deck[9] = {p0h0, p0h1, p1h0, p1h1, f0, f1, f2, turn, river}.
+    // all streets.  deck[9] = {p0h0, p0h1, p1h0, p1h1, f0, f1, f2, turn,
+    // river}.
     void indexCards(const Card deck[9]);
 };

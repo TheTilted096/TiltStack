@@ -48,44 +48,53 @@ from pathlib import Path
 import numpy as np
 
 import hand_indexer
-from flop_clusterer import (assign_flop_labels, gpu_available,
-                             remap_labels_inplace, train_flop_centroids)
+from flop_clusterer import (
+    assign_flop_labels,
+    gpu_available,
+    remap_labels_inplace,
+    train_flop_centroids,
+)
 
 # ---------------------------------------------------------------------------
 # Fixed paths
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR   = Path(__file__).parent.parent.parent / "clusters"
-TURN_LABELS_PATH      = OUTPUT_DIR / "turn_labels.bin"
-TURN_EHS_FINE_PATH    = OUTPUT_DIR / "turn_ehs_fine.bin"
-CENTROIDS_PATH        = OUTPUT_DIR / "flop_centroids.npy"
-EHS_PATH              = OUTPUT_DIR / "flop_ehs.bin"
-EHS_FINE_PATH         = OUTPUT_DIR / "flop_ehs_fine.bin"
-LABELS_PATH           = OUTPUT_DIR / "flop_labels.bin"
+OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
+TURN_LABELS_PATH = OUTPUT_DIR / "turn_labels.bin"
+TURN_EHS_FINE_PATH = OUTPUT_DIR / "turn_ehs_fine.bin"
+CENTROIDS_PATH = OUTPUT_DIR / "flop_centroids.npy"
+EHS_PATH = OUTPUT_DIR / "flop_ehs.bin"
+EHS_FINE_PATH = OUTPUT_DIR / "flop_ehs_fine.bin"
+LABELS_PATH = OUTPUT_DIR / "flop_labels.bin"
 
 
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
 
+
 class FlopClusterPipeline:
     """Orchestrates the flop clustering pipeline."""
 
-    def __init__(self, k: int, niter: int, seed: int, threads: int,
-                 verbose: bool = True):
-        self.k       = k
-        self.niter   = niter
-        self.seed    = seed
+    def __init__(
+        self, k: int, niter: int, seed: int, threads: int, verbose: bool = True
+    ):
+        self.k = k
+        self.niter = niter
+        self.seed = seed
         self.threads = threads
         self.verbose = verbose
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-        for path, name in [(TURN_LABELS_PATH,   "turn_labels.bin"),
-                           (TURN_EHS_FINE_PATH, "turn_ehs_fine.bin")]:
+        for path, name in [
+            (TURN_LABELS_PATH, "turn_labels.bin"),
+            (TURN_EHS_FINE_PATH, "turn_ehs_fine.bin"),
+        ]:
             if not path.exists():
                 raise FileNotFoundError(
                     f"{name} not found at {path}. "
-                    "Run the upstream turn clustering pipeline first.")
+                    "Run the upstream turn clustering pipeline first."
+                )
 
     def log(self, msg: str):
         if self.verbose:
@@ -96,10 +105,11 @@ class FlopClusterPipeline:
             os.environ[var] = str(self.threads)
 
     def _make_expander(self):
-        self.log("  Loading turn_labels.bin (~110 MB) and "
-                 "turn_ehs_fine.bin (~110 MB) into RAM...")
-        return hand_indexer.FlopExpander(str(TURN_LABELS_PATH),
-                                         str(TURN_EHS_FINE_PATH))
+        self.log(
+            "  Loading turn_labels.bin (~110 MB) and "
+            "turn_ehs_fine.bin (~110 MB) into RAM..."
+        )
+        return hand_indexer.FlopExpander(str(TURN_LABELS_PATH), str(TURN_EHS_FINE_PATH))
 
     # ------------------------------------------------------------------
     # Pipeline steps
@@ -112,23 +122,27 @@ class FlopClusterPipeline:
             # Still need CDFs for training; re-compute (cheap, ~5 s)
         self.log("==> Step 1/3: Computing data for all flop states...")
         self._set_thread_env()
-        expander   = self._make_expander()
+        expander = self._make_expander()
         num_states = expander.num_states()
         self.log(f"  Flop states: {num_states:,}")
 
-        t0      = time.time()
+        t0 = time.time()
         indices = np.arange(num_states, dtype=np.uint64)
 
         hist, all_ehs, all_mult = expander.compute_sample_ehs_mult(indices)
         all_cdfs = np.cumsum(hist.astype(np.float32), axis=1)
-        self.log(f"  CDF matrix: {all_cdfs.shape[0]:,} x {all_cdfs.shape[1]}  "
-                 f"({all_cdfs.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)")
+        self.log(
+            f"  CDF matrix: {all_cdfs.shape[0]:,} x {all_cdfs.shape[1]}  "
+            f"({all_cdfs.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)"
+        )
 
         if not EHS_FINE_PATH.exists():
             np.rint(all_ehs * 65535.0).astype(np.uint16).tofile(EHS_FINE_PATH)
             self.log(f"  EHS fine saved: {EHS_FINE_PATH}")
         else:
-            all_ehs = np.fromfile(EHS_FINE_PATH, dtype=np.uint16).astype(np.float32) / 65535.0
+            all_ehs = (
+                np.fromfile(EHS_FINE_PATH, dtype=np.uint16).astype(np.float32) / 65535.0
+            )
 
         return all_cdfs, all_ehs, all_mult
 
@@ -138,16 +152,22 @@ class FlopClusterPipeline:
             self.log("Centroids already exist, skipping training.")
             return np.load(CENTROIDS_PATH)
 
-        self.log(f"==> Step 2/3: Training K={self.k:,} centroids "
-                 f"({self.niter} iterations, L1)...")
+        self.log(
+            f"==> Step 2/3: Training K={self.k:,} centroids "
+            f"({self.niter} iterations, L1)..."
+        )
         centroids = train_flop_centroids(all_cdfs, self.k, self.niter, self.seed)
         np.save(CENTROIDS_PATH, centroids)
         self.log(f"  Centroids saved: {CENTROIDS_PATH}")
         return centroids
 
-    def step_assign_sort_remap(self, all_cdfs: np.ndarray, all_ehs: np.ndarray,
-                               all_mult: np.ndarray,
-                               centroids: np.ndarray) -> None:
+    def step_assign_sort_remap(
+        self,
+        all_cdfs: np.ndarray,
+        all_ehs: np.ndarray,
+        all_mult: np.ndarray,
+        centroids: np.ndarray,
+    ) -> None:
         """Assign labels, sort by true per-cluster EHS, remap, write output files."""
         if LABELS_PATH.exists() and EHS_PATH.exists():
             self.log("Labels and EHS already exist, skipping assignment.")
@@ -159,16 +179,18 @@ class FlopClusterPipeline:
         labels = assign_flop_labels(all_cdfs, centroids, str(LABELS_PATH))
 
         # Multiplicity-weighted per-cluster EHS
-        mult    = all_mult.astype(np.float64)
-        ehs_wt  = all_ehs.astype(np.float64) * mult
+        mult = all_mult.astype(np.float64)
+        ehs_wt = all_ehs.astype(np.float64) * mult
         ehs_sum = np.bincount(labels, weights=ehs_wt, minlength=k)
-        wt_sum  = np.bincount(labels, weights=mult,   minlength=k)
+        wt_sum = np.bincount(labels, weights=mult, minlength=k)
         per_cluster_ehs = (ehs_sum / np.maximum(wt_sum, 1.0)).astype(np.float32)
-        self.log(f"  Per-cluster EHS range: "
-                 f"[{per_cluster_ehs.min():.4f}, {per_cluster_ehs.max():.4f}]")
+        self.log(
+            f"  Per-cluster EHS range: "
+            f"[{per_cluster_ehs.min():.4f}, {per_cluster_ehs.max():.4f}]"
+        )
 
         sort_order = np.argsort(per_cluster_ehs)
-        centroids  = centroids[sort_order]
+        centroids = centroids[sort_order]
         per_cluster_ehs[sort_order].tofile(EHS_PATH)
         np.save(CENTROIDS_PATH, centroids)
 
@@ -182,10 +204,14 @@ class FlopClusterPipeline:
     def run(self):
         """Execute the full pipeline."""
         if not gpu_available():
-            sys.exit("Error: No FAISS GPU support detected. A GPU is required to run this pipeline.")
+            sys.exit(
+                "Error: No FAISS GPU support detected. A GPU is required to run this pipeline."
+            )
         start = time.time()
         self.log("Starting flop clustering pipeline")
-        self.log(f"Parameters: K={self.k:,}, niter={self.niter}, threads={self.threads}")
+        self.log(
+            f"Parameters: K={self.k:,}, niter={self.niter}, threads={self.threads}"
+        )
 
         all_cdfs, all_ehs, all_mult = self.step_compute_data()
         centroids = self.step_train_centroids(all_cdfs)
@@ -208,16 +234,25 @@ Examples:
   python flop_cluster_pipeline.py -k 2048 --niter 25 -t 16
         """,
     )
-    parser.add_argument("-k", "--clusters", type=int, default=2_048,
-                        help="Number of clusters (default: 2048)")
-    parser.add_argument("-i", "--niter", type=int, default=25,
-                        help="K-means iterations (default: 25)")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Random seed (default: 42)")
-    parser.add_argument("-t", "--threads", type=int, default=16,
-                        help="OMP thread count (default: 16)")
-    parser.add_argument("-q", "--quiet", action="store_true",
-                        help="Suppress status messages")
+    parser.add_argument(
+        "-k",
+        "--clusters",
+        type=int,
+        default=2_048,
+        help="Number of clusters (default: 2048)",
+    )
+    parser.add_argument(
+        "-i", "--niter", type=int, default=25, help="K-means iterations (default: 25)"
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed (default: 42)"
+    )
+    parser.add_argument(
+        "-t", "--threads", type=int, default=16, help="OMP thread count (default: 16)"
+    )
+    parser.add_argument(
+        "-q", "--quiet", action="store_true", help="Suppress status messages"
+    )
 
     args = parser.parse_args()
 

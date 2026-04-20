@@ -18,19 +18,20 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
-OUTPUT_DIR   = Path(__file__).parent.parent.parent / "clusters"
-EHS_PATH     = OUTPUT_DIR / "preflop_ehs_fine.bin"
-MATRIX_OUT   = OUTPUT_DIR / "preflop_ehs_matrix.png"
-RANKING_OUT  = OUTPUT_DIR / "preflop_ehs_ranking.png"
+OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
+EHS_PATH = OUTPUT_DIR / "preflop_ehs_fine.bin"
+MATRIX_OUT = OUTPUT_DIR / "preflop_ehs_matrix.png"
+RANKING_OUT = OUTPUT_DIR / "preflop_ehs_ranking.png"
 
 NUM_HANDS = 169
 
 # Rank chars used by hand_indexer (matches RANK_CHARS in bindings.cpp)
-_RANK_CHARS = "23456789TJQKA"   # index 0='2', index 12='A'
+_RANK_CHARS = "23456789TJQKA"  # index 0='2', index 12='A'
 _SUIT_CHARS = "cdhs"
 
 
@@ -38,12 +39,12 @@ _SUIT_CHARS = "cdhs"
 # Data loading
 # ---------------------------------------------------------------------------
 
+
 def load_ehs(path: str) -> np.ndarray:
     """Load 169 uint16-quantized EHS values from binary file and decode to float32."""
     if not os.path.isfile(path):
         sys.exit(
-            f"Error: EHS file not found: {path}\n"
-            "Run preflop_ehs_pipeline.py first."
+            f"Error: EHS file not found: {path}\nRun preflop_ehs_pipeline.py first."
         )
     data = np.fromfile(path, dtype=np.uint16).astype(np.float32) / 65535.0
     if len(data) != NUM_HANDS:
@@ -55,6 +56,7 @@ def try_import_indexer():
     """Import PreflopIndexer from the hand_indexer pybind module."""
     try:
         from hand_indexer import PreflopIndexer
+
         return PreflopIndexer()
     except ImportError as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -64,6 +66,7 @@ def try_import_indexer():
 # ---------------------------------------------------------------------------
 # Hand info: build canonical metadata for all 169 indices
 # ---------------------------------------------------------------------------
+
 
 def _parse_card(card_str: str):
     """Parse a card string like 'As' into (rank_idx, suit_idx).
@@ -87,14 +90,14 @@ def build_hand_info(indexer) -> list:
     """
     hands = []
     for idx in range(NUM_HANDS):
-        raw    = indexer.unindex(idx)        # e.g. "Kc As"
-        parts  = raw.split()                 # ["Kc", "As"]
+        raw = indexer.unindex(idx)  # e.g. "Kc As"
+        parts = raw.split()  # ["Kc", "As"]
         r1, s1 = _parse_card(parts[0])
         r2, s2 = _parse_card(parts[1])
 
-        high   = max(r1, r2)
-        low    = min(r1, r2)
-        is_pair   = (r1 == r2)
+        high = max(r1, r2)
+        low = min(r1, r2)
+        is_pair = r1 == r2
         is_suited = (s1 == s2) and not is_pair
 
         hr = _RANK_CHARS[high]
@@ -107,8 +110,7 @@ def build_hand_info(indexer) -> list:
             name = hr + lr + "o"
 
         hands.append(
-            dict(idx=idx, name=name, high=high, low=low,
-                 suited=is_suited, pair=is_pair)
+            dict(idx=idx, name=name, high=high, low=low, suited=is_suited, pair=is_pair)
         )
     return hands
 
@@ -116,6 +118,7 @@ def build_hand_info(indexer) -> list:
 # ---------------------------------------------------------------------------
 # Figure 1: 13×13 heatmap
 # ---------------------------------------------------------------------------
+
 
 def build_matrix(hand_info, ehs_values):
     """Build 13×13 arrays (ehs, names) for the hand matrix.
@@ -125,24 +128,24 @@ def build_matrix(hand_info, ehs_values):
     Diagonal        (row d = col d) : pairs
     Lower triangle  (row d > col d) : offsuit
     """
-    mat   = np.full((13, 13), np.nan, dtype=np.float64)
+    mat = np.full((13, 13), np.nan, dtype=np.float64)
     names = np.full((13, 13), "", dtype=object)
 
     for h in hand_info:
-        ehs  = float(ehs_values[h["idx"]])
+        ehs = float(ehs_values[h["idx"]])
         hi_d = 12 - h["high"]
         lo_d = 12 - h["low"]
 
         if h["pair"]:
-            mat[hi_d, hi_d]   = ehs
+            mat[hi_d, hi_d] = ehs
             names[hi_d, hi_d] = h["name"]
         elif h["suited"]:
             # hi_d < lo_d because high rank > low rank  →  upper triangle
-            mat[hi_d, lo_d]   = ehs
+            mat[hi_d, lo_d] = ehs
             names[hi_d, lo_d] = h["name"]
         else:
             # offsuit: swap to lower triangle
-            mat[lo_d, hi_d]   = ehs
+            mat[lo_d, hi_d] = ehs
             names[lo_d, hi_d] = h["name"]
 
     return mat, names
@@ -155,7 +158,7 @@ def plot_matrix(mat, names, ehs_values, out_path):
 
     fig, ax = plt.subplots(figsize=(14, 12))
     cmap = plt.cm.RdYlGn
-    im   = ax.imshow(mat, cmap=cmap, vmin=vmin, vmax=vmax, aspect="equal")
+    im = ax.imshow(mat, cmap=cmap, vmin=vmin, vmax=vmax, aspect="equal")
 
     # Annotate cells
     mid = (vmin + vmax) / 2
@@ -163,14 +166,22 @@ def plot_matrix(mat, names, ehs_values, out_path):
         for c in range(13):
             if np.isnan(mat[r, c]):
                 continue
-            v      = mat[r, c]
+            v = mat[r, c]
             bright = cmap((v - vmin) / (vmax - vmin))[:3]
             # perceived luminance
-            lum    = 0.299 * bright[0] + 0.587 * bright[1] + 0.114 * bright[2]
+            lum = 0.299 * bright[0] + 0.587 * bright[1] + 0.114 * bright[2]
             tcolor = "black" if lum > 0.45 else "white"
-            ax.text(c, r, f"{names[r, c]}\n{v:.3f}",
-                    ha="center", va="center", fontsize=6.5,
-                    color=tcolor, fontweight="bold", linespacing=1.3)
+            ax.text(
+                c,
+                r,
+                f"{names[r, c]}\n{v:.3f}",
+                ha="center",
+                va="center",
+                fontsize=6.5,
+                color=tcolor,
+                fontweight="bold",
+                linespacing=1.3,
+            )
 
     rank_labels = [_RANK_CHARS[12 - d] for d in range(13)]  # A K Q … 2
     ax.set_xticks(range(13))
@@ -180,12 +191,29 @@ def plot_matrix(mat, names, ehs_values, out_path):
     ax.tick_params(length=0)
 
     # Axis role labels
-    ax.text(0.5, -0.06, "suited  ↗  (second card rank, upper-right)",
-            ha="center", va="center", transform=ax.transAxes,
-            fontsize=9, color="#1565C0", fontstyle="italic")
-    ax.text(-0.06, 0.5, "offsuit  ↙  (lower-left)",
-            ha="center", va="center", transform=ax.transAxes,
-            fontsize=9, color="#B71C1C", fontstyle="italic", rotation=90)
+    ax.text(
+        0.5,
+        -0.06,
+        "suited  ↗  (second card rank, upper-right)",
+        ha="center",
+        va="center",
+        transform=ax.transAxes,
+        fontsize=9,
+        color="#1565C0",
+        fontstyle="italic",
+    )
+    ax.text(
+        -0.06,
+        0.5,
+        "offsuit  ↙  (lower-left)",
+        ha="center",
+        va="center",
+        transform=ax.transAxes,
+        fontsize=9,
+        color="#B71C1C",
+        fontstyle="italic",
+        rotation=90,
+    )
 
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     cbar.set_label("EHS (Equity Head-to-Showdown)", fontsize=11)
@@ -194,7 +222,9 @@ def plot_matrix(mat, names, ehs_values, out_path):
     ax.set_title(
         "Preflop EHS — 13×13 Hand Matrix\n"
         "upper-right: suited  │  diagonal: pairs  │  lower-left: offsuit",
-        fontsize=13, fontweight="bold", pad=14,
+        fontsize=13,
+        fontweight="bold",
+        pad=14,
     )
 
     plt.tight_layout()
@@ -207,21 +237,22 @@ def plot_matrix(mat, names, ehs_values, out_path):
 # Figure 2: Ranked bar chart
 # ---------------------------------------------------------------------------
 
+
 def plot_ranking(hand_info, ehs_values, out_path):
     """Figure 2: horizontal bar chart of all 169 hands ranked by EHS."""
     order = sorted(hand_info, key=lambda h: float(ehs_values[h["idx"]]))
 
-    bar_names  = [h["name"]                    for h in order]
+    bar_names = [h["name"] for h in order]
     bar_values = [float(ehs_values[h["idx"]]) for h in order]
 
     bar_colors = []
     for h in order:
         if h["pair"]:
-            bar_colors.append("#4CAF50")   # green
+            bar_colors.append("#4CAF50")  # green
         elif h["suited"]:
-            bar_colors.append("#1565C0")   # blue
+            bar_colors.append("#1565C0")  # blue
         else:
-            bar_colors.append("#CC2222")   # red
+            bar_colors.append("#CC2222")  # red
 
     fig, ax = plt.subplots(figsize=(10, 22))
 
@@ -231,8 +262,7 @@ def plot_ranking(hand_info, ehs_values, out_path):
     # EHS labels on bars
     x_max = max(bar_values)
     for i, v in enumerate(bar_values):
-        ax.text(v + 0.003, i, f"{v:.3f}", va="center", fontsize=5.5,
-                color="#222222")
+        ax.text(v + 0.003, i, f"{v:.3f}", va="center", fontsize=5.5, color="#222222")
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(bar_names, fontsize=7, fontfamily="monospace")
@@ -244,8 +274,15 @@ def plot_ranking(hand_info, ehs_values, out_path):
     for pct, label in [(25, "Q1"), (50, "Q2"), (75, "Q3")]:
         q = float(np.percentile(arr, pct))
         ax.axvline(q, color="#888888", ls="--", lw=0.9, alpha=0.8, zorder=0)
-        ax.text(q, len(order) - 0.5, label, ha="center", va="bottom",
-                fontsize=8, color="#666666")
+        ax.text(
+            q,
+            len(order) - 0.5,
+            label,
+            ha="center",
+            va="bottom",
+            fontsize=8,
+            color="#666666",
+        )
 
     # Legend
     legend_elements = [
@@ -258,7 +295,8 @@ def plot_ranking(hand_info, ehs_values, out_path):
     ax.set_title(
         "Preflop EHS — All 169 Canonical Hands Ranked\n"
         "green = pairs   blue = suited   red = offsuit",
-        fontsize=13, fontweight="bold",
+        fontsize=13,
+        fontweight="bold",
     )
     ax.grid(axis="x", alpha=0.25)
     ax.spines["top"].set_visible(False)
@@ -274,9 +312,10 @@ def plot_ranking(hand_info, ehs_values, out_path):
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
-    ehs_path    = os.path.abspath(EHS_PATH)
-    matrix_out  = os.path.abspath(MATRIX_OUT)
+    ehs_path = os.path.abspath(EHS_PATH)
+    matrix_out = os.path.abspath(MATRIX_OUT)
     ranking_out = os.path.abspath(RANKING_OUT)
 
     ehs = load_ehs(ehs_path)

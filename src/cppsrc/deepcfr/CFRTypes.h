@@ -57,12 +57,12 @@ struct InfoSet {
     bool isButton; // true if stm == 0
 };
 
-static_assert(offsetof(InfoSet, betHist)     ==  52, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, betHist) == 52, "InfoSet layout changed");
 static_assert(offsetof(InfoSet, betHistMask) == 148, "InfoSet layout changed");
-static_assert(offsetof(InfoSet, streetBucket)== 152, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, streetBucket) == 152, "InfoSet layout changed");
 static_assert(offsetof(InfoSet, streetEmbed) == 158, "InfoSet layout changed");
-static_assert(offsetof(InfoSet, isButton)    == 162, "InfoSet layout changed");
-static_assert(sizeof(InfoSet)                == 168, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, isButton) == 162, "InfoSet layout changed");
+static_assert(sizeof(InfoSet) == 168, "InfoSet layout changed");
 
 struct BoardState {
     int pot;

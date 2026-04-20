@@ -56,8 +56,8 @@ class Scheduler {
 
   public:
     int threadId;
-    Reservoir* advReservoir = nullptr;
-    Reservoir* polReservoir = nullptr;
+    Reservoir *advReservoir = nullptr;
+    Reservoir *polReservoir = nullptr;
 
     explicit Scheduler(InferenceQueue &q, int threadId)
         : inferenceQueue(q), threadId(threadId) {}

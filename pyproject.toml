@@ -1,0 +1,33 @@
+[project]
+name = "tiltstack"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "tensorboard",
+    "open-spiel",
+    "torch",
+    "faiss-gpu-cu12",
+]
+
+[project.optional-dependencies]
+demos = [
+    "rlcard>=1.0.5",
+    "streamlit>=1.30.0",
+    "plotly>=5.18.0",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu124" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.11",
+]

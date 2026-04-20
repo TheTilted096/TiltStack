@@ -15,10 +15,10 @@ High-performance C++ implementation of Counterfactual Regret Minimization Plus (
 ### Installation
 
 ```bash
-# Install dependencies
-make install
+# Install Python dependencies (from repo root)
+make install   # runs: uv sync --extra demos
 
-# Build C++ extension
+# Build C++ extension via CMake
 make build
 
 # Run solver (100k iterations)
@@ -27,14 +27,10 @@ make test
 
 ### Requirements
 
-- Python 3.8+
-- C++ compiler with C++20 support
-- pybind11
-- matplotlib (for plotting)
-
-```bash
-pip install -r requirements.txt
-```
+- Python 3.11+
+- C++ compiler with C++20 support (g++ 10+ or clang++ 12+)
+- CMake 3.20+
+- uv (manages all Python dependencies)
 
 ## Performance
 
@@ -61,9 +57,8 @@ leduc/
 │       └── Leduc.py          # Training loop, visualization
 ├── output/              # Results (CSV, plots, analysis)
 ├── docs/               # Documentation
-├── Makefile            # Build targets
-├── setup.py            # pybind11 build config
-└── requirements.txt    # Python dependencies
+├── CMakeLists.txt      # CMake build config (fetches pybind11 via FetchContent)
+└── Makefile            # Thin wrapper around cmake targets
 ```
 
 ## Algorithm Details
