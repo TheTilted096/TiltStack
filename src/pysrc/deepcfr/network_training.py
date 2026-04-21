@@ -35,7 +35,7 @@ import torch.nn.functional as F
 # Constants — must match CFRTypes.h
 # ---------------------------------------------------------------------------
 
-NUM_ACTIONS = 5
+NUM_ACTIONS = 10
 CARD_BITS = 52  # bits used in each card bitmask
 EMBED_DIM = 32  # street-bucket embedding dimension per street
 NUM_STREETS = 3  # flop, turn, river (no bucket for preflop)

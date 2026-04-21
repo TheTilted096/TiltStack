@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(tiltstack CXX C)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Python 3.11 REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(OpenMP REQUIRED)
@@ -109,7 +110,6 @@ add_executable(cfr_tests
     cppsrc/test/test_cfrgame.cpp
     cppsrc/test/test_deepcfr.cpp
     cppsrc/test/test_rng.cpp
-    cppsrc/test/test_scheduler.cpp
     cppsrc/deepcfr/CFRGame.cpp
     cppsrc/deepcfr/DeepCFR.cpp
     cppsrc/deepcfr/Scheduler.cpp

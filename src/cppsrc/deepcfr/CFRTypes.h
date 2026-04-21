@@ -13,18 +13,22 @@ constexpr int STARTING_STACK = 40000; // 20 BB in milli-chips
 constexpr int SMALL_BLIND = 1000;     // milli-chips
 constexpr int BIG_BLIND = 2000;       // milli-chips
 
-const int NUM_ACTIONS = 5; // number of distinct actions
-const int MAX_ACTIONS = 6; // maximum number of actions per betting round
+const int NUM_ACTIONS = 10; // number of distinct actions
+const int MAX_ACTIONS = 6;  // maximum number of actions per betting round
 
 const int NUM_ROUNDS = 4;
 
 enum class Action : uint8_t {
-    CHECK, // also FOLD
-    CALL,
-    BET50,
-    BET100,
-    // BET200,
-    ALLIN
+    CHECK,  // 0 — also FOLD when to_call > 0
+    CALL,   // 1
+    BET33,  // 2 — 0.33x pot
+    BET50,  // 3 — 0.50x pot
+    BET75,  // 4 — 0.75x pot
+    BET100, // 5 — 1.00x pot
+    BET150, // 6 — 1.50x pot
+    BET200, // 7 — 2.00x pot
+    BET300, // 8 — 3.00x pot
+    ALLIN   // 9
 };
 
 enum class Round : uint8_t { PREFLOP, FLOP, TURN, RIVER };

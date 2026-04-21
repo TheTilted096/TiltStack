@@ -53,9 +53,14 @@ from network_training import DeepCFRNet, decode_batch, NUM_ACTIONS
 
 _CHECK = 0  # also FOLD when to_call > 0
 _CALL = 1
-_BET50 = 2
-_BET100 = 3
-_ALLIN = 4
+_BET33 = 2
+_BET50 = 3
+_BET75 = 4
+_BET100 = 5
+_BET150 = 6
+_BET200 = 7
+_BET300 = 8
+_ALLIN = 9
 
 # ---------------------------------------------------------------------------
 # Scale factor: 1 OpenSpiel chip == OSP_MC_SCALE CFRGame milli-chips.
@@ -148,17 +153,23 @@ def _cfr_bet_amounts(game):
     Return the milli-chip cost of each abstract raise action in the current
     CFRGame state, mirroring CFRGame::makeMove / generateActions.
 
-    Returns a dict {action_int: milli_chips} for BET50, BET100, ALLIN.
+    Returns a dict {action_int: milli_chips} for BET33..BET300 and ALLIN.
     CHECK and CALL are not raises so they are omitted.
     """
     pot = game.pot
     to_call = game.to_call
     stm = game.stm
     stacks = game.stacks
+    eff = pot + to_call
 
     return {
-        _BET50: to_call + (pot + to_call) // 2,
-        _BET100: to_call + (pot + to_call),
+        _BET33: to_call + eff // 3,
+        _BET50: to_call + eff // 2,
+        _BET75: to_call + eff * 3 // 4,
+        _BET100: to_call + eff,
+        _BET150: to_call + eff * 3 // 2,
+        _BET200: to_call + eff * 2,
+        _BET300: to_call + eff * 3,
         _ALLIN: min(stacks[stm], to_call + stacks[1 - stm]),
     }
 

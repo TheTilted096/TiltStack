@@ -63,13 +63,11 @@ class CFRGame {
     int generateActions(ActionList &);
 
     // Apply a bet of amount_milli milli-chips.  The financial state is updated
-    // with the exact amount; the recorded action label is the pot-fraction
-    // abstract action whose fraction is closest to amount_milli / (pot +
-    // toCall):
+    // with the exact amount; the recorded action label is the nearest abstract
+    // action by arithmetic midpoint between consecutive pot fractions:
     //   CHECK  — amount_milli == 0
     //   CALL   — amount_milli <= toCall
-    //   BET50  — raise fraction < 0.75  (closer to 0.5× pot)
-    //   BET100 — raise fraction >= 0.75 and < all-in  (closer to 1.0× pot)
+    //   BET33..BET300 — raise fraction nearest to 0.33/0.5/0.75/1/1.5/2/3× pot
     //   ALLIN  — amount_milli >= effective all-in amount (clamped)
     void makeBet(int amount_milli);
 

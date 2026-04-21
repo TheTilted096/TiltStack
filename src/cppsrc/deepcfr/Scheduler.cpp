@@ -38,21 +38,6 @@ int Scheduler::purgeCompleted() {
     return completed;
 }
 
-void Scheduler::run() {
-    while (true) {
-        while (!ready.empty()) {
-            Handle h = ready.front();
-            ready.pop();
-            h.resume();
-        }
-
-        if (pendingHandles.empty())
-            break;
-
-        flushBatch();
-    }
-}
-
 void Scheduler::clearBuffers() {
     advantageInputs.clear();
     advantageOutputs.clear();
