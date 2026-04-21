@@ -5,6 +5,10 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(Python 3.11 REQUIRED COMPONENTS Interpreter Development.Module)
 
+# Tell pybind11 to use CMake's find_package(Python) instead of its own legacy
+# FindPythonInterp/FindPythonLibs, so it picks up the same Python we found.
+set(PYBIND11_FINDPYTHON ON)
+
 include(FetchContent)
 
 FetchContent_Declare(pybind11

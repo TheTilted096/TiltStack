@@ -197,17 +197,29 @@ Runs 1,000 iterations of vanilla CFR on 3-card Kuhn Poker and displays
 interactive convergence plots on 2D strategy simplices. Requires only
 `numpy` and `matplotlib`.
 
-### Leduc Hold'em CFR+ Solver
+### Leduc Hold'em CFR+ Solver & Demo
+
+No GPU required — works on any laptop (macOS or Linux).
 
 ```bash
 cd demos/leduc
-make install   # uv sync --extra demos
-make build     # configure + compile C++ extension via CMake
-make test      # train for 100k iterations
+
+# Install demo Python packages (streamlit, plotly, rlcard, numpy, matplotlib)
+make install
+
+# Compile C++ extension via CMake (downloads pybind11 automatically)
+make
+
+# Launch the interactive Streamlit demo at localhost:8501
+make demo
+
+# Or run the CFR+ solver standalone for 100k iterations (~27s)
+make test
 ```
 
 See [LEDUC.md](LEDUC.md) and [LEDUC_IMPLEMENTATION.md](LEDUC_IMPLEMENTATION.md)
-for details.
+for algorithm details, and [`demos/leduc/README.md`](../demos/leduc/README.md)
+for the full demo guide including how to add new opponent profiles.
 
 ---
 
