@@ -147,8 +147,8 @@ TEST(CFRGame, TerminalDetection) {
     EXPECT_EQ(g3.isTerminalState(Action::CHECK), 2);
 }
 
-// Initial state: callAmt=1000, effPot=4000, minRaise=3000.
-// BET33 (→2333) is below minRaise and is skipped; the remaining 9 actions
+// Initial state: callAmt=2500, effPot=10000, minRaise=7500.
+// BET33 (→5833) is below minRaise and is skipped; the remaining 9 actions
 // are emitted in ascending fraction order.
 // CALL is absent after SB calls (toCall == 0).
 TEST(CFRGame, GenerateActions) {

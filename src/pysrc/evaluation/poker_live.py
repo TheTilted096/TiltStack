@@ -27,8 +27,8 @@ Keybindings
     q / Q    quit
 
 OpenSpiel / CFRGame conventions match match_runner.py exactly:
-    STARTING_STACK = 40,000 milli-chips  =  2,000 chips  =  20 BB
-    BIG_BLIND      =  2,000 milli-chips  =    100 chips
+    STARTING_STACK = 100,000 milli-chips  =  5,000 chips  =  50 BB
+    BIG_BLIND      =   2,000 milli-chips  =    100 chips
     1 chip = 10 mBB
 """
 
@@ -50,6 +50,7 @@ import deepcfr
 from tilt_agents import (
     TiltStack_DeepCFR,
     load_net_auto,
+    _abstract_to_osp,
 )
 from network_training import DeepCFRNet, NUM_ACTIONS, infoset_dtype
 
@@ -58,7 +59,7 @@ from network_training import DeepCFRNet, NUM_ACTIONS, infoset_dtype
 # ---------------------------------------------------------------------------
 
 OSP_BIG_BLIND = 100  # chips  (blind=50 100 in game string)
-OSP_STACK = 2_000  # chips per player
+OSP_STACK = 5_000  # chips per player
 
 GAME_STRING = (
     "universal_poker("
@@ -71,7 +72,7 @@ GAME_STRING = (
     "blind=50 100,"
     "maxRaises=99 99 99 99,"
     "numBoardCards=0 3 1 1,"
-    "stack=2000 2000,"
+    "stack=5000 5000,"
     "firstPlayer=1 2 2 2,"  # <-- Explicitly sets HUNL action order
     "bettingAbstraction=fullgame"
     ")"
@@ -135,8 +136,9 @@ class PokerLive:
 
         # Cheat-mode state
         self.cheat_mode = False
-        self.last_bot_probs = None  # np.ndarray (NUM_ACTIONS,) or None
-        self.last_bot_abstract = -1  # abstract action index bot chose last
+        self.last_bot_probs = None     # np.ndarray (NUM_ACTIONS,) or None
+        self.last_bot_abstract = -1    # abstract action index bot chose last
+        self.last_bot_legal: set = set()  # set of legal abstract action indices
         self.last_bot_raw_info = None  # raw uint8 InfoSet buffer (1, 168) or None
 
         # Raise input state (None = not active, str = digits typed so far)
@@ -157,6 +159,7 @@ class PokerLive:
         self.invested = [50, 100]  # blinds are auto-posted before betting
         self.last_bot_probs = None
         self.last_bot_abstract = -1
+        self.last_bot_legal = set()
         self.last_bot_raw_info = None
         self.raise_input = None
 
@@ -195,9 +198,10 @@ class PokerLive:
                     osp_action = 1  # fallback: call/check
                 else:
                     self.last_bot_raw_info = self.bot.game.get_info().copy()
-                    masked_logits, _ = self.bot._forward(self.bot.model)
+                    masked_logits, legal_abstract = self.bot._forward(self.bot.model)
                     probs = F.softmax(torch.from_numpy(masked_logits), dim=0).numpy()
                     self.last_bot_probs = probs.copy()
+                    self.last_bot_legal = set(legal_abstract)
                     self.last_bot_abstract = int(np.random.choice(NUM_ACTIONS, p=probs))
                     osp_action = _abstract_to_osp(
                         self.last_bot_abstract,
@@ -286,11 +290,11 @@ class PokerLive:
         """
         Parse self.last_bot_raw_info into human-readable display lines.
 
-        Scalars are normalised by STARTING_STACK=40 000 milli-chips in the C++
-        struct.  To recover chips: raw × 40 000 / OSP_MC_SCALE = raw × 2 000.
+        Scalars are normalised by STARTING_STACK=100 000 milli-chips in the C++
+        struct.  To recover chips: raw × 100 000 / OSP_MC_SCALE = raw × 5 000.
         """
-        # raw × STARTING_STACK_mc / mc_per_chip = raw × 40000 / 20 = raw × 2000
-        NORM_TO_CHIPS = 40_000 / 20  # = 2000
+        # raw × STARTING_STACK_mc / mc_per_chip = raw × 100000 / 20 = raw × 5000
+        NORM_TO_CHIPS = 100_000 / 20  # = 5000
 
         if self.last_bot_raw_info is None:
             return ["  │  InfoSet: (no data yet)"]
@@ -314,6 +318,7 @@ class PokerLive:
         opp_norm = float(rec["opp_stack"])
         pot_norm = float(rec["pot_size"])
         tc_norm = float(rec["to_call"])
+        spr = float(rec["explicit_spr"])
 
         def _mask_to_cards(mask: int) -> str:
             if mask == 0:
@@ -352,7 +357,7 @@ class PokerLive:
             f"  │  EHS:    {ehs:.1f}%",
             f"  │  Buckets: {bkt_str}",
             f"  │  Stack:  Me:{my_norm:.4f}  Opp:{opp_norm:.4f}  (norm)",
-            f"  │  Pot:{pot_norm:.4f}  ToCall:{tc_norm:.4f}  (norm)",
+            f"  │  Pot:{pot_norm:.4f}  ToCall:{tc_norm:.4f}  SPR:{spr:.4f}  (norm)",
             "  │  BetHist:",
             *bh_lines,
         ]
@@ -476,14 +481,42 @@ class PokerLive:
                 ]
                 probs = self.last_bot_probs
                 chosen = self.last_bot_abstract
-                parts = []
-                for i, (lb, p) in enumerate(zip(labels, probs)):
-                    marker = "►" if i == chosen else " "
-                    parts.append(f"{marker}{lb}:{p * 100:4.0f}%")
-                put(row, 0, "  └── " + "  ".join(parts), C_CYN)
+                '''
+                COL = 8
+                label_line = "".join(
+                    f"{'►' if i == chosen else ' '}{lb:<{COL - 1}}"
+                    for i, lb in enumerate(labels)
+                )
+                prob_line = "".join(f"{p * 100:{COL}.0f}%" for p in probs)
+                put(row, 0, "  └── " + label_line, C_CYN)
+                row += 1
+                put(row, 0, prob_line, C_CYN)
+                '''
+                prefix = "   └── "
+                COL_WIDTH = 9
+                inner = COL_WIDTH - 2
+
+                put(row, 0, prefix, C_CYN)
+                for i, (label, p) in enumerate(zip(labels, probs)):
+                    col = len(prefix) + i * COL_WIDTH
+                    illegal = i not in self.last_bot_legal
+                    attr = (
+                        C_CYN | BOLD if i == chosen
+                        else C_CYN | DIM if illegal
+                        else C_CYN
+                    )
+                    val_str = f"{p * 100:.0f}%"
+                    if i == chosen:
+                        put(row,     col, f"[{label:^{inner}}]", attr)
+                        put(row + 1, col, f"[{val_str:^{inner}}]", attr)
+                    else:
+                        put(row,     col, f" {label:^{inner}} ", attr)
+                        put(row + 1, col, f" {val_str:^{inner}} ", attr)
+                row += 2
             else:
                 put(row, 0, "  └── (no bot action yet)", C_CYN | DIM)
-            row += 1
+                row += 1
+            row += 1  # blank line before InfoSet
             for line in self._infoset_lines():
                 put(row, 0, line, C_CYN | DIM)
                 row += 1

@@ -47,7 +47,7 @@ FLOP_BUCKETS = 2049  # 0 = unused, 1–2048 = flop cluster labels
 TURN_BUCKETS = 8193  # 0 = unused, 1–8192 = turn cluster labels
 RIVER_BUCKETS = 8193  # 0 = unused, 1–8192 = river cluster labels
 
-CONT_DIM = 4 * CARD_BITS + 5 + 4 * 6 + 4 * 6 + 4 + 1  # 208+5+24+24+4+1 = 266
+CONT_DIM = 4 * CARD_BITS + 5 + 4 * 6 + 4 * 6 + 4 + 1 + 1  # 208+5+24+24+4+1+1 = 267
 INPUT_DIM = CONT_DIM + NUM_STREETS * EMBED_DIM  # 266 + 96        = 362
 
 # ---------------------------------------------------------------------------
@@ -72,6 +72,7 @@ infoset_dtype = np.dtype(
             "street_bucket",
             "street_embed",
             "is_button",
+            "explicit_spr",
         ],
         "formats": [
             "<u8",
@@ -88,6 +89,7 @@ infoset_dtype = np.dtype(
             ("<u2", 3),  # streetBucket[3]
             ("?", 4),  # streetEmbed[4]  (bool)
             "?",  # isButton         (bool)
+            "<f4",  # explicitSPR     (float, offset 164)
         ],
         "offsets": [
             0,
@@ -103,7 +105,8 @@ infoset_dtype = np.dtype(
             148,  # bet_hist_mask (4 bytes)
             152,  # street_bucket (6 bytes)
             158,  # street_embed (4 bytes)
-            162,  # is_button (1 byte) — struct padded to 168
+            162,  # is_button (1 byte)
+            164,  # explicit_spr (4 bytes, fills former trailing pad)
         ],
         "itemsize": 168,
     }
@@ -162,9 +165,10 @@ def decode_batch(raw: np.ndarray):
     shifts = np.arange(24, dtype=np.uint32)
     parts.append(((mask[:, None] >> shifts[None, :]) & np.uint32(1)).astype(np.float32))
 
-    # Street encoding and button flag
+    # Street encoding, button flag, and stack-to-pot ratio
     parts.append(batch["street_embed"].astype(np.float32))  # (N, 4)
     parts.append(batch["is_button"].astype(np.float32).reshape(N, 1))
+    parts.append(batch["explicit_spr"].astype(np.float32).reshape(N, 1))
 
     x_cont = torch.from_numpy(np.concatenate(parts, axis=1))  # (N, CONT_DIM)
 
@@ -314,7 +318,10 @@ def decode_batch_gpu(raw_gpu: torch.Tensor):
     # 5. Buckets (Bytes 152-157): 3x 16-bit ints
     buckets = raw_gpu.view(torch.int16)[:, 76:79].long()
 
-    x_cont = torch.cat([bits, floats, mask_bits, bools], dim=1)
+    # 6. explicitSPR (Bytes 164-167): float32 at float index 41
+    explicit_spr = raw_gpu.view(torch.float32)[:, 41:42]
+
+    x_cont = torch.cat([bits, floats, mask_bits, bools, explicit_spr], dim=1)
 
     return x_cont, buckets
 

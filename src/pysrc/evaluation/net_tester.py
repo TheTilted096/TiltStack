@@ -15,9 +15,9 @@ Usage:
         --device cpu
 
 OpenSpiel game parameters are tuned to match the training setup:
-    STARTING_STACK = 40,000 milli-chips = 20 BB
-    BIG_BLIND      = 2,000  milli-chips  →  chips unit = 100 milli-chips
-    Stack in chips = 2000,  Blinds = 50/100
+    STARTING_STACK = 100,000 milli-chips = 50 BB
+    BIG_BLIND      =   2,000 milli-chips  →  chips unit = 100 milli-chips
+    Stack in chips = 5000,  Blinds = 50/100
 """
 
 import argparse
@@ -55,7 +55,7 @@ GAME_STRING = (
     "blind=50 100,"
     "maxRaises=99 99 99 99,"
     "numBoardCards=0 3 1 1,"
-    "stack=2000 2000,"
+    "stack=5000 5000,"
     "firstPlayer=1 2 2 2,"  # <-- Explicitly sets HUNL action order
     "bettingAbstraction=fullgame"
     ")"

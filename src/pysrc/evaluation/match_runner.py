@@ -49,7 +49,7 @@ GAME_STRING = (
     "blind=50 100,"
     "maxRaises=99 99 99 99,"
     "numBoardCards=0 3 1 1,"
-    "stack=2000 2000,"
+    "stack=5000 5000,"
     "firstPlayer=1 2 2 2,"
     "bettingAbstraction=fullgame"
     ")"

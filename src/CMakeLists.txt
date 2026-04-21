@@ -113,6 +113,7 @@ add_executable(cfr_tests
     cppsrc/deepcfr/CFRGame.cpp
     cppsrc/deepcfr/DeepCFR.cpp
     cppsrc/deepcfr/Scheduler.cpp
+    cppsrc/deepcfr/Reservoir.cpp
 )
 set_target_properties(cfr_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 target_compile_options(cfr_tests PRIVATE -O3)

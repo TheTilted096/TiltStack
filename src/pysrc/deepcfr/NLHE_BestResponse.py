@@ -23,6 +23,7 @@ import sys
 import time
 import signal
 import atexit
+import gc
 import argparse
 import subprocess
 from pathlib import Path
@@ -368,6 +369,7 @@ def main():
     # ---- Final advantage networks -------------------------------------------
     writer.close()
     del writer
+    gc.collect()  # close the SummaryWriter's event-file fd before killing TB
     if last_t > 0:
         paths = save_final_advantages(ckpt_dir, last_t, adv_nets)
         print(

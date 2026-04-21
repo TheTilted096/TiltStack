@@ -27,11 +27,11 @@ Player convention
   hero=True   →  player 1  →  big blind    →  acts when isButton=False
 """
 
+import gc
 import os
 import sys
 import time
 import signal
-import atexit
 import argparse
 import subprocess
 from pathlib import Path
@@ -226,9 +226,6 @@ def main():
     log_dir = Path(__file__).parent.parent.parent / "runs" / run_name
     log_dir.mkdir(parents=True, exist_ok=True)
     writer = launch_tb(log_dir)
-    atexit.register(
-        lambda: subprocess.run(["pkill", "-f", "tensorboard"], capture_output=True)
-    )
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     print(
         f"[{_ts()}]  TensorBoard → http://127.0.0.1:6006/?darkMode=false&runFilter={run_name}#timeseries\n"
@@ -270,7 +267,6 @@ def main():
     # ---- Training loop ------------------------------------------------------
     iter_times = []
     last_t = 0  # last fully completed CFR iteration
-    _interrupted = False
 
     try:
         for t in range(1, args.iters + 1):
@@ -363,7 +359,6 @@ def main():
             last_t = t
 
     except KeyboardInterrupt:
-        _interrupted = True
         print(
             f"\n[{_ts()}]  Interrupted after {last_t} iterations — skipping to policy training ..."
         )
@@ -409,15 +404,15 @@ def main():
 
     writer.close()
     del writer
+    gc.collect()  # close the SummaryWriter's event-file fd before killing TB
     path = save_final_policy(ckpt_dir, last_t, strat_net)
     print(f"[{_ts()}] ==> Done.  Final policy → {path.split('/')[-1]}")
 
-    if _interrupted:
-        # C++ worker threads are stuck mid-rollout and will cause the
-        # interpreter to hang during shutdown. Force-exit after explicit
-        # TensorBoard cleanup (atexit won't run with os._exit).
-        subprocess.run(["pkill", "-f", "tensorboard"], capture_output=True)
-        os._exit(0)
+    # Kill TensorBoard and force-exit. os._exit skips interpreter shutdown,
+    # avoiding broken-pipe noise from any remaining buffered handles.
+    # Atexit won't fire, so we kill TensorBoard explicitly here instead.
+    subprocess.run(["pkill", "-f", "tensorboard"], capture_output=True)
+    os._exit(0)
 
 
 if __name__ == "__main__":

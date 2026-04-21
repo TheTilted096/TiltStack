@@ -29,8 +29,8 @@ Two agents are provided:
 OpenSpiel / CFRGame conventions:
   Player 0  = small blind = button in HUNL
   Player 1  = big blind
-  STARTING_STACK = 40,000 milli-chips = 20 BB   (CFRGame training constant)
-  OSP_STACK      = 2,000  chips                 (recommended OpenSpiel config)
+  STARTING_STACK = 100,000 milli-chips = 50 BB  (CFRGame training constant)
+  OSP_STACK      =   5,000 chips                (recommended OpenSpiel config)
   OSP_MC_SCALE   = STARTING_STACK / OSP_STACK = 20  (chips → milli-chips)
 """
 
@@ -64,12 +64,12 @@ _ALLIN = 9
 
 # ---------------------------------------------------------------------------
 # Scale factor: 1 OpenSpiel chip == OSP_MC_SCALE CFRGame milli-chips.
-# Derived from STARTING_STACK=40000 / OSP_STACK=2000.
+# Derived from STARTING_STACK=100000 / OSP_STACK=5000.
 # Update if the OpenSpiel game string uses different stack sizes.
 # ---------------------------------------------------------------------------
 
-STARTING_STACK = 40_000  # milli-chips (CFRGame constant)
-OSP_STACK = 2_000  # chips (must match stack= in the game string)
+STARTING_STACK = 100_000  # milli-chips (CFRGame constant)
+OSP_STACK = 5_000  # chips (must match stack= in the game string)
 OSP_MC_SCALE = STARTING_STACK // OSP_STACK  # = 20
 
 

@@ -50,7 +50,7 @@ Task<float> traverse(CFRGame &game, bool hero, int t, Scheduler &sched) {
         co_return game.payout();
 
     ActionList moves;
-    int numMoves = game.generateActions(moves);
+    int numMoves = game.generateActions(moves, /*prune=*/true);
 
     Regrets predictedRegrets =
         co_await InferenceAwaitable{game.getInfo(), sched};

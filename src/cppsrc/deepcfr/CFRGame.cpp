@@ -13,18 +13,15 @@ hand_indexer_t g_indexer;
 //   5/12, 5/8, 7/8, 5/4, 7/4, 5/2
 // ---------------------------------------------------------------------------
 static Action classifyRaise(int raiseComp, int effPot) {
-    if (raiseComp * 12 < effPot * 5)
-        return Action::BET33;
-    if (raiseComp * 8 < effPot * 5)
-        return Action::BET50;
-    if (raiseComp * 8 < effPot * 7)
-        return Action::BET75;
-    if (raiseComp * 4 < effPot * 5)
-        return Action::BET100;
-    if (raiseComp * 4 < effPot * 7)
-        return Action::BET150;
-    if (raiseComp * 2 < effPot * 5)
-        return Action::BET200;
+    const auto &F = CFRGame::BetFractions;
+    for (int i = 0; i + 1 < (int)F.size(); i++) {
+        // Midpoint between F[i] and F[i+1] via cross-multiplication (no floats).
+        // raiseComp/effPot < (F[i]+F[i+1])/2 iff:
+        //   raiseComp * 2*F[i].den*F[i+1].den < effPot * (F[i].num*F[i+1].den + F[i].den*F[i+1].num)
+        if (raiseComp * 2 * F[i].den * F[i+1].den <
+            effPot * (F[i].num * F[i+1].den + F[i].den * F[i+1].num))
+            return static_cast<Action>(2 + i);
+    }
     return Action::BET300;
 }
 
@@ -114,8 +111,7 @@ bool CFRGame::endsStreet(const Action &a) {
     return false;
 }
 
-int CFRGame::isTerminalState(
-    const Action &a) { // 2 showdown, 1 fold, 0 continue
+int CFRGame::isTerminalState(const Action &a) { // 2 showdown, 1 fold, 0 continue
     if (isFold(a)) {
         return 1;
     }
@@ -140,42 +136,19 @@ void CFRGame::makeMove(const Action &a) {
     bool streetEnded = endsStreet(a);
     isTerminal = isTerminalState(a);
 
-    int bet = 0;
-
     const BoardState &last = history[ply];
     int effPot = last.pot + last.toCall;
+    int bet = 0;
 
-    switch (a) {
-    case Action::CALL:
+    if (a == Action::CALL) {
         bet = last.toCall;
-        break;
-    case Action::BET33:
-        bet = last.toCall + effPot / 3;
-        break;
-    case Action::BET50:
-        bet = last.toCall + effPot / 2;
-        break;
-    case Action::BET75:
-        bet = last.toCall + effPot * 3 / 4;
-        break;
-    case Action::BET100:
-        bet = last.toCall + effPot;
-        break;
-    case Action::BET150:
-        bet = last.toCall + effPot * 3 / 2;
-        break;
-    case Action::BET200:
-        bet = last.toCall + effPot * 2;
-        break;
-    case Action::BET300:
-        bet = last.toCall + effPot * 3;
-        break;
-    case Action::ALLIN:
+    } else if (a == Action::ALLIN) {
         bet = std::min(stacks[last.stm], last.toCall + stacks[!last.stm]);
-        break;
-    default:
-        break; // CHECK: bet = 0
+    } else if (a >= Action::BET33) {
+        const Fraction &f = BetFractions[static_cast<int>(a) - 2];
+        bet = last.toCall + effPot * f.num / f.den;
     }
+    // CHECK: bet = 0
 
     ply++;
 
@@ -296,7 +269,63 @@ float CFRGame::payout() {
     return static_cast<float>(heroWins ? opp_contrib : -my_contrib);
 }
 
-int CFRGame::generateActions(ActionList &alist) {
+// BetFractions[i] is the pot fraction for the i-th raise action (BET33…BET300).
+const std::array<Fraction, NUM_ACTIONS - 3> CFRGame::BetFractions = {{
+    {1, 3}, {1, 2}, {3, 4}, {1, 1}, {3, 2}, {2, 1}, {3, 1}
+}};
+
+const ActionList CFRGame::FullMenu = {
+    Action::BET33, Action::BET50, Action::BET75, Action::BET100,
+    Action::BET150, Action::BET200, Action::BET300,
+};
+
+// SPR buckets: 0 = Shove (<0.5), 1 = Committed (0.5–1.5),
+//              2 = Medium (1.5–4.0), 3 = Deep (≥4.0).
+// Each row lists the fraction-based raise actions to offer; ALLIN is always
+// appended by generateActions unless a fraction already hits the exact amount.
+const ActionList CFRGame::RaiseMenu[NUM_ROUNDS][4] = {
+    // PREFLOP
+    {
+        /* Shove     */ {},
+        /* Committed */ {},
+        /* Medium    */ {},
+        /* Deep      */ {Action::BET50, Action::BET75, Action::BET100,
+                         Action::BET150, Action::BET200, Action::BET300},
+    },
+    // FLOP
+    {
+        /* Shove     */ {},
+        /* Committed */ {Action::BET75, Action::BET100},
+        /* Medium    */ {Action::BET33, Action::BET50, Action::BET75,
+                         Action::BET100, Action::BET150},
+        /* Deep      */ {Action::BET33, Action::BET50, Action::BET75,
+                         Action::BET100, Action::BET150, Action::BET200, Action::BET300},
+    },
+    // TURN
+    {
+        /* Shove     */ {},
+        /* Committed */ {Action::BET75, Action::BET100},
+        /* Medium    */ {Action::BET50, Action::BET75, Action::BET100, Action::BET150},
+        /* Deep      */ {Action::BET50, Action::BET75, Action::BET100,
+                         Action::BET150, Action::BET200},
+    },
+    // RIVER
+    {
+        /* Shove     */ {},
+        /* Committed */ {Action::BET75},
+        /* Medium    */ {Action::BET75, Action::BET150},
+        /* Deep      */ {Action::BET33, Action::BET75, Action::BET150},
+    },
+};
+
+const int CFRGame::RaiseCount[NUM_ROUNDS][4] = {
+    {0, 0, 0, 6}, // PREFLOP
+    {0, 2, 5, 7}, // FLOP
+    {0, 2, 4, 5}, // TURN
+    {0, 1, 2, 3}, // RIVER
+};
+
+int CFRGame::generateActions(ActionList &alist, bool prune) {
     const BoardState &cur = history[ply];
     int playerStack = stacks[cur.stm];
     int oppStack = stacks[!cur.stm];
@@ -311,55 +340,48 @@ int CFRGame::generateActions(ActionList &alist) {
     int minRaise = callAmt + std::max(callAmt, BIG_BLIND);
 
     int roundNum = static_cast<int>(currentRound);
-    int numActs = actionCount[roundNum];
-    bool penultimate = (numActs == MAX_ACTIONS - 2);
+    bool penultimate = (actionCount[roundNum] == MAX_ACTIONS - 2);
 
     int n = 0;
-
-    // CHECK / FOLD: always legal (fold when toCall > 0, check otherwise).
     alist[n++] = Action::CHECK;
-
-    // CALL: legal whenever there is a bet to call.
     if (callAmt > 0)
         alist[n++] = Action::CALL;
-
-    // No raises possible (opponent is already all-in).
     if (allinAmt <= callAmt)
         return n;
 
-    // Pot-fraction raise sizes in ascending order.  Intermediate amounts are
-    // always distinct at our milli-chip resolution (effPot >= 3000), so no
-    // dedup between fractions is needed — only against allinAmt.
-    static const int NUM[] = {1, 1, 3, 1, 3, 2, 3};
-    static const int DEN[] = {3, 2, 4, 1, 2, 1, 1};
-    static const Action ACTS[] = {
-        Action::BET33,  Action::BET50,  Action::BET75,  Action::BET100,
-        Action::BET150, Action::BET200, Action::BET300,
-    };
-    constexpr int N_FRAC = 7;
+    const ActionList *menu;
+    int menuSize;
+    if (prune) {
+        float spr = static_cast<float>(playerStack) / cur.pot;
+        int bucket  = (spr >= 0.5f) + (spr >= 1.5f) + (spr >= 4.0f);
+        menu     = &RaiseMenu[roundNum][bucket];
+        menuSize = RaiseCount[roundNum][bucket];
+    } else {
+        menu     = &FullMenu;
+        menuSize = static_cast<int>(BetFractions.size());
+    }
 
     bool allinCovered = false;
-
-    for (int i = 0; i < N_FRAC; i++) {
-        int betAmt = callAmt + effPot * NUM[i] / DEN[i];
+    for (int i = 0; i < menuSize; i++) {
+        Action act = (*menu)[i];
+        const Fraction &f = BetFractions[static_cast<int>(act) - 2];
+        int betAmt = callAmt + effPot * f.num / f.den;
 
         if (betAmt > allinAmt)
-            break; // all larger fracs also out of range
-        if (betAmt < minRaise)
-            continue; // might still reach minRaise at higher frac
-        if (penultimate && betAmt != allinAmt)
+            break; // all subsequent raises (ascending order) also out of range
+        if (betAmt < minRaise || (penultimate && betAmt != allinAmt))
             continue;
+        if (prune && playerStack - betAmt < initialStacks[cur.stm] / 5)
+            break; // bet leaves < 20% stack — absorb remainder into All-In
 
-        alist[n++] = ACTS[i];
-
+        alist[n++] = act;
         if (betAmt == allinAmt) {
             allinCovered = true;
             break;
         }
     }
 
-    // ALLIN: legal as a true raise even below minRaise (sub-minimum shove),
-    // but suppressed when a fraction already claimed its exact amount.
+    // ALLIN: always legal as a raise unless a fraction already hit that amount.
     if (!allinCovered)
         alist[n++] = Action::ALLIN;
 
@@ -379,6 +401,7 @@ InfoSet CFRGame::getInfo() {
     info.oppStack = static_cast<float>(stacks[!stm]) / effStack;
     info.potSize = static_cast<float>(cur.pot) / effStack;
     info.toCall = static_cast<float>(cur.toCall) / effStack;
+    info.explicitSPR = std::min(info.myStack / info.potSize, 20.0f) / 20.0f;
     info.currentEHS = streetEHS[roundNum][stm];
 
     std::memcpy(info.betHist, betHist, sizeof(betHist));

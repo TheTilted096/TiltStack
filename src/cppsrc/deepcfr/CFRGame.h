@@ -60,7 +60,7 @@ class CFRGame {
 
     float payout();
 
-    int generateActions(ActionList &);
+    int generateActions(ActionList &, bool prune = false);
 
     // Apply a bet of amount_milli milli-chips.  The financial state is updated
     // with the exact amount; the recorded action label is the nearest abstract
@@ -70,6 +70,11 @@ class CFRGame {
     //   BET33..BET300 — raise fraction nearest to 0.33/0.5/0.75/1/1.5/2/3× pot
     //   ALLIN  — amount_milli >= effective all-in amount (clamped)
     void makeBet(int amount_milli);
+
+    static const std::array<Fraction, NUM_ACTIONS - 3> BetFractions;
+    static const ActionList FullMenu;
+    static const ActionList RaiseMenu[NUM_ROUNDS][4];
+    static const int RaiseCount[NUM_ROUNDS][4];
 
   private:
     // Shared by begin() and beginWithCards(): zero-initialise all game state
