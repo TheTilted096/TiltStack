@@ -12,10 +12,12 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'pysrc'))
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_here, '..', 'pysrc'))  # leducsolver, Leduc
+sys.path.insert(0, _here)                                # demo_vs_tight
 from Leduc import Leduc
 from leducsolver import Action, BestResponse as BRSolver
-from src.showcase.demo_vs_tight import (
+from demo_vs_tight import (
     _stm, _raises, _bet_round, _private_card, _legal_moves,
     _ends_hand, _payout, _next_stm, _next_hash,
     gto_action, simulate_hand,
