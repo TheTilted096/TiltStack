@@ -20,18 +20,10 @@ int Scheduler::purgeCompleted() {
     alive.reserve(tasks.size());
     int completed = 0;
     for (auto &task : tasks) {
-        if (task.done()) {
+        if (task.done())
             ++completed;
-            // Re-throw any exception the coroutine stored in its promise.
-            // Root tasks are never co_await-ed, so await_resume() — which
-            // normally propagates the exception — is never called for them.
-            // Checking here ensures coroutine failures are not silently
-            // dropped.
-            if (task.handle().promise().exception_)
-                std::rethrow_exception(task.handle().promise().exception_);
-        } else {
+        else
             alive.push_back(std::move(task));
-        }
     }
     tasks = std::move(alive);
     completedRollouts += completed;

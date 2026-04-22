@@ -27,7 +27,6 @@ Player convention
   hero=True   →  player 1  →  big blind    →  acts when isButton=False
 """
 
-import gc
 import os
 import sys
 import time
@@ -285,6 +284,10 @@ def main():
                 orch.start_iteration(hero, t, args.samples)
                 run_inference_loop(orch, adv_nets, device)
                 orch.wait_iteration()
+                #for ti, sizes in enumerate(orch.get_pool_stats()):
+                #    parts = "  ".join(f"{sz}B x{cnt:,}" for sz, cnt in sizes.items())
+                #    print(f"    thread {ti}  {parts}")
+                #orch.clear_pool_stats()
                 rollout_secs = time.perf_counter() - t0
 
                 rollouts = sum(s.rollout_count() for s in orch.schedulers)
@@ -364,14 +367,17 @@ def main():
         )
         writer.flush()
 
+    def _shutdown(code: int = 0) -> None:
+        if code == 0:
+            writer.close()
+        subprocess.run(["pkill", "-f", "tensorboard"], capture_output=True)
+        os._exit(code)
+
     # ---- Strategy network ---------------------------------------------------
-    # A second Ctrl-C here propagates normally and exits without saving.
     n_pol = strat_res.size
     if n_pol == 0:
         print(f"[{_ts()}]  No policy samples collected — nothing to save.")
-        writer.close()
-        del writer
-        raise SystemExit(1)
+        _shutdown(1)
 
     strat_epochs = args.epochs
     print(
@@ -379,40 +385,36 @@ def main():
         f"  samples={_fmt(n_pol)}  ·  {strat_epochs} epochs\n"
     )
 
-    t0 = time.perf_counter()
-    train_policy(
-        strat_net,
-        strat_opt,
-        strat_res.inputs[:n_pol],
-        strat_res.targets[:n_pol],
-        strat_res.weights[:n_pol],
-        batch_size=args.batch,
-        epochs=strat_epochs,
-        device=device,
-        epoch_callback=lambda ep, loss, secs: print(
-            f"    ep {ep:2d} / {strat_epochs}   loss = {loss:.5f}  ·  {secs:.1f}s"
-        ),
-        step_callback=lambda step, loss: writer.add_scalar(
-            "policy/loss", loss, global_step=step
-        ),
-        step_callback_freq=500,
-    )
-    strat_secs = time.perf_counter() - t0
-    print(
-        f"\n  {strat_secs:.1f}s  ·  {_rate(n_pol * strat_epochs, strat_secs)} samples/s\n"
-    )
+    try:
+        t0 = time.perf_counter()
+        train_policy(
+            strat_net,
+            strat_opt,
+            strat_res.inputs[:n_pol],
+            strat_res.targets[:n_pol],
+            strat_res.weights[:n_pol],
+            batch_size=args.batch,
+            epochs=strat_epochs,
+            device=device,
+            epoch_callback=lambda ep, loss, secs: print(
+                f"    ep {ep:2d} / {strat_epochs}   loss = {loss:.5f}  ·  {secs:.1f}s"
+            ),
+            step_callback=lambda step, loss: writer.add_scalar(
+                "policy/loss", loss, global_step=step
+            ),
+            step_callback_freq=500,
+        )
+        strat_secs = time.perf_counter() - t0
+        print(
+            f"\n  {strat_secs:.1f}s  ·  {_rate(n_pol * strat_epochs, strat_secs)} samples/s\n"
+        )
+    except KeyboardInterrupt:
+        print(f"\n[{_ts()}]  Interrupted during policy training — not saving.")
+        _shutdown(1)
 
-    writer.close()
-    del writer
-    gc.collect()  # close the SummaryWriter's event-file fd before killing TB
     path = save_final_policy(ckpt_dir, last_t, strat_net)
     print(f"[{_ts()}] ==> Done.  Final policy → {path.split('/')[-1]}")
-
-    # Kill TensorBoard and force-exit. os._exit skips interpreter shutdown,
-    # avoiding broken-pipe noise from any remaining buffered handles.
-    # Atexit won't fire, so we kill TensorBoard explicitly here instead.
-    subprocess.run(["pkill", "-f", "tensorboard"], capture_output=True)
-    os._exit(0)
+    _shutdown()
 
 
 if __name__ == "__main__":
