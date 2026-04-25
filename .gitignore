@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 
+*.tar.gz
+
 # CMake / C++ build artifacts
 build/
 *.pyd
