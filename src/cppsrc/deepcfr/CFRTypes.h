@@ -10,8 +10,8 @@ using Card = uint8_t;
 
 constexpr int NUM_PLAYERS = 2;
 constexpr int STARTING_STACK = 100000; // 50 BB in milli-chips
-constexpr int SMALL_BLIND = 1000;     // milli-chips
-constexpr int BIG_BLIND = 2000;       // milli-chips
+constexpr int SMALL_BLIND = 1000;      // milli-chips
+constexpr int BIG_BLIND = 2000;        // milli-chips
 
 const int NUM_ACTIONS = 10; // number of distinct actions
 const int MAX_ACTIONS = 6;  // maximum number of actions per betting round
@@ -31,7 +31,7 @@ enum class Action : uint8_t {
     ALLIN   // 9
 };
 
-struct Fraction{
+struct Fraction {
     int num, den;
 };
 

@@ -148,9 +148,7 @@ template <typename T> class Task {
         handle_.promise().continuation_ = caller;
         return handle_;
     }
-    T await_resume() {
-        return std::move(handle_.promise().value_);
-    }
+    T await_resume() { return std::move(handle_.promise().value_); }
 
   private:
     std::coroutine_handle<promise_type> handle_;

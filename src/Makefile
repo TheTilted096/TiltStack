@@ -60,4 +60,4 @@ clean:
 	rm -rf $(BUILD_DIR) pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*
 
 clean-hard:
-	rm -rf $(BUILD_DIR) runs .ruff_cache clusters checkpoints br_checkpoints pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*
+	rm -rf $(BUILD_DIR) logs runs .ruff_cache clusters checkpoints br_checkpoints pysrc/clustering/hand_indexer.* pysrc/deepcfr/deepcfr.*

@@ -136,8 +136,8 @@ class PokerLive:
 
         # Cheat-mode state
         self.cheat_mode = False
-        self.last_bot_probs = None     # np.ndarray (NUM_ACTIONS,) or None
-        self.last_bot_abstract = -1    # abstract action index bot chose last
+        self.last_bot_probs = None  # np.ndarray (NUM_ACTIONS,) or None
+        self.last_bot_abstract = -1  # abstract action index bot chose last
         self.last_bot_legal: set = set()  # set of legal abstract action indices
         self.last_bot_raw_info = None  # raw uint8 InfoSet buffer (1, 168) or None
 
@@ -481,7 +481,7 @@ class PokerLive:
                 ]
                 probs = self.last_bot_probs
                 chosen = self.last_bot_abstract
-                '''
+                """
                 COL = 8
                 label_line = "".join(
                     f"{'►' if i == chosen else ' '}{lb:<{COL - 1}}"
@@ -491,7 +491,7 @@ class PokerLive:
                 put(row, 0, "  └── " + label_line, C_CYN)
                 row += 1
                 put(row, 0, prob_line, C_CYN)
-                '''
+                """
                 prefix = "   └── "
                 COL_WIDTH = 9
                 inner = COL_WIDTH - 2
@@ -501,16 +501,18 @@ class PokerLive:
                     col = len(prefix) + i * COL_WIDTH
                     illegal = i not in self.last_bot_legal
                     attr = (
-                        C_CYN | BOLD if i == chosen
-                        else C_CYN | DIM if illegal
+                        C_CYN | BOLD
+                        if i == chosen
+                        else C_CYN | DIM
+                        if illegal
                         else C_CYN
                     )
                     val_str = f"{p * 100:.0f}%"
                     if i == chosen:
-                        put(row,     col, f"[{label:^{inner}}]", attr)
+                        put(row, col, f"[{label:^{inner}}]", attr)
                         put(row + 1, col, f"[{val_str:^{inner}}]", attr)
                     else:
-                        put(row,     col, f" {label:^{inner}} ", attr)
+                        put(row, col, f" {label:^{inner}} ", attr)
                         put(row + 1, col, f" {val_str:^{inner}} ", attr)
                 row += 2
             else:

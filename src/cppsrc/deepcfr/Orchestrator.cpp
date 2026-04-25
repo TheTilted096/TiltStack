@@ -106,8 +106,8 @@ void Orchestrator::runWorker(int threadIdx) {
         for (int i = 0; i < POOL_SIZE; i++) {
             CFRGame g;
             g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
-            sched.spawn(DeepCFR::rollout(std::move(g), currentHero_,
-                                         currentT_, sched));
+            sched.spawn(
+                DeepCFR::rollout(std::move(g), currentHero_, currentT_, sched));
         }
 
         // Run until the sample quota is met and all active rollouts have

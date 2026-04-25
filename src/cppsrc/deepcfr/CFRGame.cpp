@@ -15,11 +15,12 @@ hand_indexer_t g_indexer;
 static Action classifyRaise(int raiseComp, int effPot) {
     const auto &F = CFRGame::BetFractions;
     for (int i = 0; i + 1 < (int)F.size(); i++) {
-        // Midpoint between F[i] and F[i+1] via cross-multiplication (no floats).
-        // raiseComp/effPot < (F[i]+F[i+1])/2 iff:
-        //   raiseComp * 2*F[i].den*F[i+1].den < effPot * (F[i].num*F[i+1].den + F[i].den*F[i+1].num)
-        if (raiseComp * 2 * F[i].den * F[i+1].den <
-            effPot * (F[i].num * F[i+1].den + F[i].den * F[i+1].num))
+        // Midpoint between F[i] and F[i+1] via cross-multiplication (no
+        // floats). raiseComp/effPot < (F[i]+F[i+1])/2 iff:
+        //   raiseComp * 2*F[i].den*F[i+1].den < effPot * (F[i].num*F[i+1].den +
+        //   F[i].den*F[i+1].num)
+        if (raiseComp * 2 * F[i].den * F[i + 1].den <
+            effPot * (F[i].num * F[i + 1].den + F[i].den * F[i + 1].num))
             return static_cast<Action>(2 + i);
     }
     return Action::BET300;
@@ -111,7 +112,8 @@ bool CFRGame::endsStreet(const Action &a) {
     return false;
 }
 
-int CFRGame::isTerminalState(const Action &a) { // 2 showdown, 1 fold, 0 continue
+int CFRGame::isTerminalState(
+    const Action &a) { // 2 showdown, 1 fold, 0 continue
     if (isFold(a)) {
         return 1;
     }
@@ -270,12 +272,11 @@ float CFRGame::payout() {
 }
 
 // BetFractions[i] is the pot fraction for the i-th raise action (BET33…BET300).
-const std::array<Fraction, NUM_ACTIONS - 3> CFRGame::BetFractions = {{
-    {1, 3}, {1, 2}, {3, 4}, {1, 1}, {3, 2}, {2, 1}, {3, 1}
-}};
+const std::array<Fraction, NUM_ACTIONS - 3> CFRGame::BetFractions = {
+    {{1, 3}, {1, 2}, {3, 4}, {1, 1}, {3, 2}, {2, 1}, {3, 1}}};
 
 const ActionList CFRGame::FullMenu = {
-    Action::BET33, Action::BET50, Action::BET75, Action::BET100,
+    Action::BET33,  Action::BET50,  Action::BET75,  Action::BET100,
     Action::BET150, Action::BET200, Action::BET300,
 };
 
@@ -289,25 +290,30 @@ const ActionList CFRGame::RaiseMenu[NUM_ROUNDS][4] = {
         /* Shove     */ {},
         /* Committed */ {},
         /* Medium    */ {},
-        /* Deep      */ {Action::BET50, Action::BET75, Action::BET100,
-                         Action::BET150, Action::BET200, Action::BET300},
+        /* Deep      */
+        {Action::BET50, Action::BET75, Action::BET100, Action::BET150,
+         Action::BET200, Action::BET300},
     },
     // FLOP
     {
         /* Shove     */ {},
         /* Committed */ {Action::BET75, Action::BET100},
-        /* Medium    */ {Action::BET33, Action::BET50, Action::BET75,
-                         Action::BET100, Action::BET150},
-        /* Deep      */ {Action::BET33, Action::BET50, Action::BET75,
-                         Action::BET100, Action::BET150, Action::BET200, Action::BET300},
+        /* Medium    */
+        {Action::BET33, Action::BET50, Action::BET75, Action::BET100,
+         Action::BET150},
+        /* Deep      */
+        {Action::BET33, Action::BET50, Action::BET75, Action::BET100,
+         Action::BET150, Action::BET200, Action::BET300},
     },
     // TURN
     {
         /* Shove     */ {},
         /* Committed */ {Action::BET75, Action::BET100},
-        /* Medium    */ {Action::BET50, Action::BET75, Action::BET100, Action::BET150},
-        /* Deep      */ {Action::BET50, Action::BET75, Action::BET100,
-                         Action::BET150, Action::BET200},
+        /* Medium    */
+        {Action::BET50, Action::BET75, Action::BET100, Action::BET150},
+        /* Deep      */
+        {Action::BET50, Action::BET75, Action::BET100, Action::BET150,
+         Action::BET200},
     },
     // RIVER
     {
@@ -353,11 +359,11 @@ int CFRGame::generateActions(ActionList &alist, bool prune) {
     int menuSize;
     if (prune) {
         float spr = static_cast<float>(playerStack) / cur.pot;
-        int bucket  = (spr >= 0.5f) + (spr >= 1.5f) + (spr >= 4.0f);
-        menu     = &RaiseMenu[roundNum][bucket];
+        int bucket = (spr >= 0.5f) + (spr >= 1.5f) + (spr >= 4.0f);
+        menu = &RaiseMenu[roundNum][bucket];
         menuSize = RaiseCount[roundNum][bucket];
     } else {
-        menu     = &FullMenu;
+        menu = &FullMenu;
         menuSize = static_cast<int>(BetFractions.size());
     }
 

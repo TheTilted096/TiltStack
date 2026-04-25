@@ -415,32 +415,22 @@ def train_advantage(
     return losses
 
 
-def train_policy(
+def policy_trainer(
     net: DeepCFRNet,
     optimizer: torch.optim.Optimizer,
     raw_inputs: np.ndarray,  # (N, INFOSET_BYTES) uint8
     targets: np.ndarray,  # (N, NUM_ACTIONS)   float32 — instant strategy
     weights: np.ndarray,  # (N,)               int32   — iteration t
     batch_size: int = 4096,
-    epochs: int = 1,
     device: torch.device = torch.device("cuda"),
-    epoch_callback=None,  # called as epoch_callback(ep, loss, secs) after each epoch
-    step_callback=None,  # called as step_callback(global_step, loss) every step_callback_freq steps
-    step_callback_freq: int = 100,
-) -> list[float]:
+):
     """
-    Train the strategy network with iteration-weighted cross-entropy loss.
+    Generator that trains the strategy network with iteration-weighted
+    cross-entropy loss, yielding (ep, mean_loss, elapsed_secs) after each
+    epoch.  Runs indefinitely — the caller breaks when done.
 
-    Targets are probability distributions (instant strategies) produced by
-    regret matching in C++.  Cross-entropy H(target, pred) = -sum_a target(a)
-    * log softmax(pred(a)) is more appropriate than MSE for distribution
-    targets.
-
-    Each sample i contributes weight w_i = weights[i] (the iteration at which
-    it was collected). This follows the DeepCFR paper's linear weighting scheme,
-    which up-weights more recent strategy samples.
-
-    Returns per-epoch mean losses.
+    Pinned staging buffers are allocated once at generator start and reused
+    across all epochs.
     """
     import time as _time
 
@@ -449,7 +439,6 @@ def train_policy(
     tgt_pt = torch.from_numpy(targets)
     wt_pt = torch.from_numpy(weights.astype(np.float32))
 
-    # Pinned staging buffers — allocated once, reused every batch.
     raw_buf = torch.empty(
         batch_size, raw_inputs.shape[1], dtype=torch.uint8, pin_memory=True
     )
@@ -459,10 +448,9 @@ def train_policy(
     wt_buf = torch.empty(batch_size, dtype=torch.float32, pin_memory=True)
 
     net.train()
-    losses = []
-    global_step = 0
-
-    for ep in range(1, epochs + 1):
+    ep = 0
+    while True:
+        ep += 1
         ep_t0 = _time.perf_counter()
         perm = torch.randperm(N)
         total = torch.zeros(1, device=device)
@@ -479,10 +467,7 @@ def train_policy(
             optimizer.zero_grad()
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 xc, b = decode_batch_gpu(raw_b)
-                # Normalise weights within the mini-batch so they sum to 1,
-                # preventing the loss magnitude from scaling with iteration number.
                 wt_b = wt_b / wt_b.mean()
-                # Cross-entropy with soft targets: -sum_a target(a) * log_softmax(pred(a))
                 log_probs = F.log_softmax(net(xc, b), dim=1)
                 per_sample = -(t_b * log_probs).sum(dim=1)
                 loss = (wt_b * per_sample).mean()
@@ -490,12 +475,4 @@ def train_policy(
             optimizer.step()
             total += loss.detach()
             n_batches += 1
-            global_step += 1
-            if step_callback is not None and global_step % step_callback_freq == 0:
-                step_callback(global_step, loss.item())
-        mean_loss = (total / n_batches).item()
-        losses.append(mean_loss)
-        if epoch_callback is not None:
-            epoch_callback(ep, mean_loss, _time.perf_counter() - ep_t0)
-
-    return losses
+        yield ep, (total / n_batches).item(), _time.perf_counter() - ep_t0

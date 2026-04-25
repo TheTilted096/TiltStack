@@ -245,10 +245,24 @@ def main():
     run_name = time.strftime("%m%d%y_%H%M%S")
     log_dir = Path(__file__).parent.parent.parent / "runs" / run_name
     log_dir.mkdir(parents=True, exist_ok=True)
-    writer = launch_tb(log_dir)
-    atexit.register(
-        lambda: subprocess.run(["pkill", "-f", "tensorboard"], capture_output=True)
-    )
+    writer, tb_proc = launch_tb(log_dir)
+
+    _default_unraisablehook = sys.unraisablehook
+
+    def _unraisablehook(exc_info):
+        if exc_info.exc_type is not BrokenPipeError:
+            _default_unraisablehook(exc_info)
+
+    sys.unraisablehook = _unraisablehook
+
+    def _stop_tb():
+        tb_proc.terminate()
+        try:
+            tb_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            tb_proc.kill()
+
+    atexit.register(_stop_tb)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     print(
         f"[{_ts()}]  TensorBoard → http://127.0.0.1:6006/?darkMode=false&runFilter={run_name}#timeseries\n"
@@ -382,7 +396,7 @@ def main():
         # C++ worker threads are stuck mid-rollout and will cause the
         # interpreter to hang during shutdown. Force-exit after explicit
         # TensorBoard cleanup (atexit won't run with os._exit).
-        subprocess.run(["pkill", "-f", "tensorboard"], capture_output=True)
+        _stop_tb()
         os._exit(0)
 
 
