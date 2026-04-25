@@ -100,8 +100,8 @@ TEST(CFRGame, MakeUnmakeRoundtrip) {
     EXPECT_EQ(g.stacks[1], s1);
     EXPECT_EQ(g.history[0].pot, pot);
     EXPECT_EQ(g.currentRound, Round::PREFLOP);
-    EXPECT_FLOAT_EQ(g.betHist[0][0], -1.0f); // sentinel restored
-    EXPECT_FLOAT_EQ(g.betHist[0][1], -1.0f);
+    EXPECT_FLOAT_EQ(g.betHist[0][0], 0.0f); // cleared by unmakeMove
+    EXPECT_FLOAT_EQ(g.betHist[0][1], 0.0f);
 }
 
 // SB's first call must NOT end the street (BB still has option).
@@ -147,17 +147,23 @@ TEST(CFRGame, TerminalDetection) {
     EXPECT_EQ(g3.isTerminalState(Action::CHECK), 2);
 }
 
-// All five actions available in the initial state; CALL absent when toCall ==
-// 0.
+// Initial state: callAmt=2500, effPot=10000, minRaise=7500.
+// BET33 (→5833) is below minRaise and is skipped; the remaining 9 actions
+// are emitted in ascending fraction order.
+// CALL is absent after SB calls (toCall == 0).
 TEST(CFRGame, GenerateActions) {
     MAKE_GAME();
     ActionList al;
-    EXPECT_EQ(g.generateActions(al), NUM_ACTIONS);
+    EXPECT_EQ(g.generateActions(al), 9);
     EXPECT_EQ(al[0], Action::CHECK);
     EXPECT_EQ(al[1], Action::CALL);
     EXPECT_EQ(al[2], Action::BET50);
-    EXPECT_EQ(al[3], Action::BET100);
-    EXPECT_EQ(al[4], Action::ALLIN);
+    EXPECT_EQ(al[3], Action::BET75);
+    EXPECT_EQ(al[4], Action::BET100);
+    EXPECT_EQ(al[5], Action::BET150);
+    EXPECT_EQ(al[6], Action::BET200);
+    EXPECT_EQ(al[7], Action::BET300);
+    EXPECT_EQ(al[8], Action::ALLIN);
 
     g.makeMove(Action::CALL); // SB calls → BB faces toCall == 0
     int n = g.generateActions(al);

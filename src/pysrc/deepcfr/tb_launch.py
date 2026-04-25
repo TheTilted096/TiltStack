@@ -14,13 +14,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 def launch_tb(
     log_dir: Path, port: int = 6006, reload_interval: int = 20
-) -> SummaryWriter:
+) -> tuple[SummaryWriter, subprocess.Popen]:
     """
-    Launch TensorBoard pointed at log_dir.parent and return a SummaryWriter
-    for log_dir.  The caller is responsible for calling writer.close() and
-    for registering any cleanup handlers.
+    Launch TensorBoard pointed at log_dir.parent and return (writer, proc).
+    The caller is responsible for writer.close() and proc.terminate().
     """
-    subprocess.Popen(
+    proc = subprocess.Popen(
         [
             Path(sys.executable).parent / "tensorboard",
             "--logdir",
@@ -34,4 +33,4 @@ def launch_tb(
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    return SummaryWriter(log_dir=str(log_dir))
+    return SummaryWriter(log_dir=str(log_dir)), proc

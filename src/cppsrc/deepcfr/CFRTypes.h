@@ -9,22 +9,30 @@
 using Card = uint8_t;
 
 constexpr int NUM_PLAYERS = 2;
-constexpr int STARTING_STACK = 40000; // 20 BB in milli-chips
-constexpr int SMALL_BLIND = 1000;     // milli-chips
-constexpr int BIG_BLIND = 2000;       // milli-chips
+constexpr int STARTING_STACK = 100000; // 50 BB in milli-chips
+constexpr int SMALL_BLIND = 1000;      // milli-chips
+constexpr int BIG_BLIND = 2000;        // milli-chips
 
-const int NUM_ACTIONS = 5; // number of distinct actions
-const int MAX_ACTIONS = 6; // maximum number of actions per betting round
+const int NUM_ACTIONS = 10; // number of distinct actions
+const int MAX_ACTIONS = 6;  // maximum number of actions per betting round
 
 const int NUM_ROUNDS = 4;
 
 enum class Action : uint8_t {
-    CHECK, // also FOLD
-    CALL,
-    BET50,
-    BET100,
-    // BET200,
-    ALLIN
+    CHECK,  // 0 — also FOLD when to_call > 0
+    CALL,   // 1
+    BET33,  // 2 — 0.33x pot
+    BET50,  // 3 — 0.50x pot
+    BET75,  // 4 — 0.75x pot
+    BET100, // 5 — 1.00x pot
+    BET150, // 6 — 1.50x pot
+    BET200, // 7 — 2.00x pot
+    BET300, // 8 — 3.00x pot
+    ALLIN   // 9
+};
+
+struct Fraction {
+    int num, den;
 };
 
 enum class Round : uint8_t { PREFLOP, FLOP, TURN, RIVER };
@@ -55,6 +63,10 @@ struct InfoSet {
     // 1-byte: one-hot round encoding and button flag
     std::array<bool, NUM_ROUNDS> streetEmbed;
     bool isButton; // true if stm == 0
+
+    // 4-byte: stack-to-pot ratio, clamped to [0,20] and normalised to [0,1].
+    // Occupies bytes 164-167, filling the former 5-byte trailing pad region.
+    float explicitSPR;
 };
 
 static_assert(offsetof(InfoSet, betHist) == 52, "InfoSet layout changed");
@@ -62,6 +74,7 @@ static_assert(offsetof(InfoSet, betHistMask) == 148, "InfoSet layout changed");
 static_assert(offsetof(InfoSet, streetBucket) == 152, "InfoSet layout changed");
 static_assert(offsetof(InfoSet, streetEmbed) == 158, "InfoSet layout changed");
 static_assert(offsetof(InfoSet, isButton) == 162, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, explicitSPR) == 164, "InfoSet layout changed");
 static_assert(sizeof(InfoSet) == 168, "InfoSet layout changed");
 
 struct BoardState {
