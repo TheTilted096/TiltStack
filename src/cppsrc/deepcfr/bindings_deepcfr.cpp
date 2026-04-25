@@ -111,7 +111,7 @@ PYBIND11_MODULE(deepcfr, m) {
         .def("generate_actions",
              [](CFRGame &g) {
                  ActionList alist;
-                 int n = g.generateActions(alist);
+                 int n = g.generateActions(alist, /*prune=*/true);
                  std::vector<int> out;
                  out.reserve(n);
                  for (int i = 0; i < n; i++)
@@ -333,5 +333,20 @@ PYBIND11_MODULE(deepcfr, m) {
              })
 
         .def("clear_buffers", &Orchestrator::clearBuffers)
-        .def("drain_pool", &Orchestrator::drainPool);
+        .def("drain_pool", &Orchestrator::drainPool)
+
+        // Returns a list of dicts, one per worker thread, with pool stats from
+        // the last iteration. Call after wait_iteration().
+        .def("get_pool_stats",
+             [](const Orchestrator &o) {
+                 py::list result;
+                 for (const auto &s : o.getPoolStats()) {
+                     py::dict sizes;
+                     for (const auto &[sz, cnt] : s.allSizes)
+                         sizes[py::int_(sz)] = cnt;
+                     result.append(sizes);
+                 }
+                 return result;
+             })
+        .def("clear_pool_stats", &Orchestrator::clearPoolStats);
 }

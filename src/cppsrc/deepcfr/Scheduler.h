@@ -86,10 +86,6 @@ class Scheduler {
     // many slots opened up for new spawns.
     int purgeCompleted();
 
-    // Original one-shot drain — spawns nothing new, runs until all tasks done.
-    // Kept for unit tests.
-    void run();
-
     std::size_t enqueueInference(InfoSet input, Handle handle);
 
     // ---- Python interface ---------------------------------------------------

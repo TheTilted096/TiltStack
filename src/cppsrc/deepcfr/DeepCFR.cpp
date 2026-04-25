@@ -50,7 +50,7 @@ Task<float> traverse(CFRGame &game, bool hero, int t, Scheduler &sched) {
         co_return game.payout();
 
     ActionList moves;
-    int numMoves = game.generateActions(moves);
+    int numMoves = game.generateActions(moves, /*prune=*/true);
 
     Regrets predictedRegrets =
         co_await InferenceAwaitable{game.getInfo(), sched};
@@ -72,11 +72,10 @@ Task<float> traverse(CFRGame &game, bool hero, int t, Scheduler &sched) {
             nodeEV += instantStrategy[actionInt] * actionUtils[actionInt];
         }
 
-        float pot = static_cast<float>(game.history[game.ply].pot);
         for (int j = 0; j < numMoves; j++) {
             int actionInt = static_cast<int>(moves[j]);
             trueRegret[actionInt] = (actionUtils[actionInt] - nodeEV) /
-                                    (pot + static_cast<float>(BIG_BLIND));
+                                    static_cast<float>(STARTING_STACK);
         }
 
         sched.advantageInputs.push_back(game.getInfo());

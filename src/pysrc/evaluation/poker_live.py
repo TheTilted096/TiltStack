@@ -18,8 +18,7 @@ Keybindings
   During your turn:
     f / F    fold
     c / C    call or check
-    1        bet ~50%  pot
-    2        bet ~100% pot
+    r / R    raise (type chip amount, Enter to confirm, Esc to cancel)
     a / A    all-in
 
   Any time:
@@ -28,8 +27,8 @@ Keybindings
     q / Q    quit
 
 OpenSpiel / CFRGame conventions match match_runner.py exactly:
-    STARTING_STACK = 40,000 milli-chips  =  2,000 chips  =  20 BB
-    BIG_BLIND      =  2,000 milli-chips  =    100 chips
+    STARTING_STACK = 100,000 milli-chips  =  5,000 chips  =  50 BB
+    BIG_BLIND      =   2,000 milli-chips  =    100 chips
     1 chip = 10 mBB
 """
 
@@ -52,11 +51,6 @@ from tilt_agents import (
     TiltStack_DeepCFR,
     load_net_auto,
     _abstract_to_osp,
-    _CHECK,
-    _CALL,
-    _BET50,
-    _BET100,
-    _ALLIN,
 )
 from network_training import DeepCFRNet, NUM_ACTIONS, infoset_dtype
 
@@ -65,7 +59,7 @@ from network_training import DeepCFRNet, NUM_ACTIONS, infoset_dtype
 # ---------------------------------------------------------------------------
 
 OSP_BIG_BLIND = 100  # chips  (blind=50 100 in game string)
-OSP_STACK = 2_000  # chips per player
+OSP_STACK = 5_000  # chips per player
 
 GAME_STRING = (
     "universal_poker("
@@ -78,7 +72,7 @@ GAME_STRING = (
     "blind=50 100,"
     "maxRaises=99 99 99 99,"
     "numBoardCards=0 3 1 1,"
-    "stack=2000 2000,"
+    "stack=5000 5000,"
     "firstPlayer=1 2 2 2,"  # <-- Explicitly sets HUNL action order
     "bettingAbstraction=fullgame"
     ")"
@@ -144,7 +138,11 @@ class PokerLive:
         self.cheat_mode = False
         self.last_bot_probs = None  # np.ndarray (NUM_ACTIONS,) or None
         self.last_bot_abstract = -1  # abstract action index bot chose last
+        self.last_bot_legal: set = set()  # set of legal abstract action indices
         self.last_bot_raw_info = None  # raw uint8 InfoSet buffer (1, 168) or None
+
+        # Raise input state (None = not active, str = digits typed so far)
+        self.raise_input: str | None = None
 
     # ------------------------------------------------------------------
     # Hand lifecycle
@@ -161,7 +159,9 @@ class PokerLive:
         self.invested = [50, 100]  # blinds are auto-posted before betting
         self.last_bot_probs = None
         self.last_bot_abstract = -1
+        self.last_bot_legal = set()
         self.last_bot_raw_info = None
+        self.raise_input = None
 
         hp, bp = self.human_player, 1 - self.human_player
         sb_tag = f"{'YOU' if hp == 0 else 'bot'}(SB)"
@@ -198,9 +198,10 @@ class PokerLive:
                     osp_action = 1  # fallback: call/check
                 else:
                     self.last_bot_raw_info = self.bot.game.get_info().copy()
-                    masked_logits, _ = self.bot._forward(self.bot.model)
+                    masked_logits, legal_abstract = self.bot._forward(self.bot.model)
                     probs = F.softmax(torch.from_numpy(masked_logits), dim=0).numpy()
                     self.last_bot_probs = probs.copy()
+                    self.last_bot_legal = set(legal_abstract)
                     self.last_bot_abstract = int(np.random.choice(NUM_ACTIONS, p=probs))
                     osp_action = _abstract_to_osp(
                         self.last_bot_abstract,
@@ -264,35 +265,22 @@ class PokerLive:
         """
         self.bot._sync_game(self.state)
 
-    def _key_to_action(self, key: int) -> int | None:
-        """Convert a keypress to an OpenSpiel action, or None if the key is invalid."""
+    def _resolve_raise(self) -> int | None:
+        """Snap the typed chip amount to the nearest legal OSP raise action."""
+        if not self.raise_input:
+            return None
+        try:
+            added = int(self.raise_input)
+        except ValueError:
+            return None
+        if added <= 0:
+            return None
         legal = self.state.legal_actions()
         raises = sorted(a for a in legal if a > 1)
-
-        if key in (ord("f"), ord("F")):
-            return 0 if 0 in legal else None
-
-        if key in (ord("c"), ord("C")):
-            return 1 if 1 in legal else None
-
-        if key == ord("1") and raises:
-            self._sync_human_perspective()
-            al = self.bot.game.generate_actions()
-            if _BET50 in al:
-                return _abstract_to_osp(_BET50, legal, self.bot.game)
-            return raises[0]  # fallback: smallest legal raise
-
-        if key == ord("2") and raises:
-            self._sync_human_perspective()
-            al = self.bot.game.generate_actions()
-            if _BET100 in al:
-                return _abstract_to_osp(_BET100, legal, self.bot.game)
-            return raises[len(raises) // 2]
-
-        if key in (ord("a"), ord("A")) and raises:
-            return raises[-1]  # maximum legal raise = all-in
-
-        return None
+        if not raises:
+            return None
+        target = self.invested[self.human_player] + added
+        return min(raises, key=lambda a: abs(a - target))
 
     # ------------------------------------------------------------------
     # Rendering helpers
@@ -302,11 +290,11 @@ class PokerLive:
         """
         Parse self.last_bot_raw_info into human-readable display lines.
 
-        Scalars are normalised by STARTING_STACK=40 000 milli-chips in the C++
-        struct.  To recover chips: raw × 40 000 / OSP_MC_SCALE = raw × 2 000.
+        Scalars are normalised by STARTING_STACK=100 000 milli-chips in the C++
+        struct.  To recover chips: raw × 100 000 / OSP_MC_SCALE = raw × 5 000.
         """
-        # raw × STARTING_STACK_mc / mc_per_chip = raw × 40000 / 20 = raw × 2000
-        NORM_TO_CHIPS = 40_000 / 20  # = 2000
+        # raw × STARTING_STACK_mc / mc_per_chip = raw × 100000 / 20 = raw × 5000
+        NORM_TO_CHIPS = 100_000 / 20  # = 5000
 
         if self.last_bot_raw_info is None:
             return ["  │  InfoSet: (no data yet)"]
@@ -330,6 +318,7 @@ class PokerLive:
         opp_norm = float(rec["opp_stack"])
         pot_norm = float(rec["pot_size"])
         tc_norm = float(rec["to_call"])
+        spr = float(rec["explicit_spr"])
 
         def _mask_to_cards(mask: int) -> str:
             if mask == 0:
@@ -368,7 +357,7 @@ class PokerLive:
             f"  │  EHS:    {ehs:.1f}%",
             f"  │  Buckets: {bkt_str}",
             f"  │  Stack:  Me:{my_norm:.4f}  Opp:{opp_norm:.4f}  (norm)",
-            f"  │  Pot:{pot_norm:.4f}  ToCall:{tc_norm:.4f}  (norm)",
+            f"  │  Pot:{pot_norm:.4f}  ToCall:{tc_norm:.4f}  SPR:{spr:.4f}  (norm)",
             "  │  BetHist:",
             *bh_lines,
         ]
@@ -478,17 +467,58 @@ class PokerLive:
         # Inference + InfoSet rows (cheat mode only)
         if self.cheat_mode:
             if self.last_bot_probs is not None:
-                labels = ["F/Chk", "Call ", "B50% ", "B100%", "A-in "]
+                labels = [
+                    "F/Chk",
+                    "Call ",
+                    "B33% ",
+                    "B50% ",
+                    "B75% ",
+                    "B100%",
+                    "B150%",
+                    "B200%",
+                    "B300%",
+                    "A-in ",
+                ]
                 probs = self.last_bot_probs
                 chosen = self.last_bot_abstract
-                parts = []
-                for i, (lb, p) in enumerate(zip(labels, probs)):
-                    marker = "►" if i == chosen else " "
-                    parts.append(f"{marker}{lb}:{p * 100:4.0f}%")
-                put(row, 0, "  └── " + "  ".join(parts), C_CYN)
+                """
+                COL = 8
+                label_line = "".join(
+                    f"{'►' if i == chosen else ' '}{lb:<{COL - 1}}"
+                    for i, lb in enumerate(labels)
+                )
+                prob_line = "".join(f"{p * 100:{COL}.0f}%" for p in probs)
+                put(row, 0, "  └── " + label_line, C_CYN)
+                row += 1
+                put(row, 0, prob_line, C_CYN)
+                """
+                prefix = "   └── "
+                COL_WIDTH = 9
+                inner = COL_WIDTH - 2
+
+                put(row, 0, prefix, C_CYN)
+                for i, (label, p) in enumerate(zip(labels, probs)):
+                    col = len(prefix) + i * COL_WIDTH
+                    illegal = i not in self.last_bot_legal
+                    attr = (
+                        C_CYN | BOLD
+                        if i == chosen
+                        else C_CYN | DIM
+                        if illegal
+                        else C_CYN
+                    )
+                    val_str = f"{p * 100:.0f}%"
+                    if i == chosen:
+                        put(row, col, f"[{label:^{inner}}]", attr)
+                        put(row + 1, col, f"[{val_str:^{inner}}]", attr)
+                    else:
+                        put(row, col, f" {label:^{inner}} ", attr)
+                        put(row + 1, col, f" {val_str:^{inner}} ", attr)
+                row += 2
             else:
                 put(row, 0, "  └── (no bot action yet)", C_CYN | DIM)
-            row += 1
+                row += 1
+            row += 1  # blank line before InfoSet
             for line in self._infoset_lines():
                 put(row, 0, line, C_CYN | DIM)
                 row += 1
@@ -535,39 +565,36 @@ class PokerLive:
             legal = self.state.legal_actions()
             to_call = max(self.invested) - self.invested[self.human_player]
             raises = sorted(a for a in legal if a > 1)
+            hp_invested = self.invested[self.human_player]
 
-            parts: list[str] = []
-            if 0 in legal:
-                parts.append("[F]old")
-            if 1 in legal:
-                parts.append(
-                    f"[C]all +{to_call / OSP_BIG_BLIND:.2f} BB"
-                    if to_call > 0
-                    else "[C]heck"
+            if self.raise_input is not None:
+                resolved = self._resolve_raise()
+                preview = (
+                    f"  +{(resolved - hp_invested) / OSP_BIG_BLIND:.2f} BB"
+                    if resolved is not None
+                    else "  (invalid)"
                 )
-
-            if raises:
-                # Sync CFRGame from human's seat to get meaningful bet amounts
-                self._sync_human_perspective()
-                al = self.bot.game.generate_actions()
-                hp_invested = self.invested[self.human_player]
-                if _BET50 in al:
-                    a = _abstract_to_osp(_BET50, legal, self.bot.game)
+                put(
+                    row,
+                    0,
+                    f"  Raise: {self.raise_input}_{preview}   [Enter] confirm   [Esc] cancel",
+                    BOLD,
+                )
+            else:
+                parts: list[str] = []
+                if 0 in legal:
+                    parts.append("[F]old")
+                if 1 in legal:
                     parts.append(
-                        f"[1] ~50%pot +{(a - hp_invested) / OSP_BIG_BLIND:.2f} BB"
+                        f"[C]all +{to_call / OSP_BIG_BLIND:.2f} BB"
+                        if to_call > 0
+                        else "[C]heck"
                     )
-                if _BET100 in al:
-                    a = _abstract_to_osp(_BET100, legal, self.bot.game)
-                    parts.append(
-                        f"[2] ~100%pot +{(a - hp_invested) / OSP_BIG_BLIND:.2f} BB"
-                    )
-                if _ALLIN in al:
-                    a = _abstract_to_osp(_ALLIN, legal, self.bot.game)
-                    parts.append(
-                        f"[A]ll-in +{(a - hp_invested) / OSP_BIG_BLIND:.2f} BB"
-                    )
-
-            put(row, 0, "  → " + "   ".join(parts), BOLD)
+                if raises:
+                    parts.append("[R]aise")
+                    allin_added = raises[-1] - hp_invested
+                    parts.append(f"[A]ll-in +{allin_added / OSP_BIG_BLIND:.2f} BB")
+                put(row, 0, "  → " + "   ".join(parts), BOLD)
 
         else:
             put(row, 0, "  (bot acting...)", DIM)
@@ -575,7 +602,7 @@ class PokerLive:
         row += 1
         hline(row)
         row += 1
-        put(row, 0, "  [X] cheat mode   [N] next hand   [Q] quit", DIM)
+        put(row, 0, "  [X] cheat   [N] next hand   [Q] quit", DIM)
 
         stdscr.refresh()
 
@@ -617,15 +644,34 @@ class PokerLive:
                 and not self.state.is_terminal()
                 and self.state.current_player() == self.human_player
             ):
-                # print()
-                # print(self.state.legal_actions())
-                # for a in self.state.legal_actions():
-                #    print(f"Action {a}: {self.state.action_to_string(self.state.current_player(), a)}")
+                legal = self.state.legal_actions()
+                raises = sorted(a for a in legal if a > 1)
 
-                action = self._key_to_action(key)
-                if action is not None:
-                    self._apply_logged(self.human_player, action)
-                    self._advance()
+                if self.raise_input is not None:
+                    if key in (10, 13, curses.KEY_ENTER):  # confirm
+                        action = self._resolve_raise()
+                        self.raise_input = None
+                        if action is not None:
+                            self._apply_logged(self.human_player, action)
+                            self._advance()
+                    elif key == 27:  # Esc — cancel
+                        self.raise_input = None
+                    elif key in (curses.KEY_BACKSPACE, 127, 8):
+                        self.raise_input = self.raise_input[:-1]
+                    elif 48 <= key <= 57:  # digit
+                        self.raise_input += chr(key)
+                else:
+                    if key in (ord("f"), ord("F")) and 0 in legal:
+                        self._apply_logged(self.human_player, 0)
+                        self._advance()
+                    elif key in (ord("c"), ord("C")) and 1 in legal:
+                        self._apply_logged(self.human_player, 1)
+                        self._advance()
+                    elif key in (ord("r"), ord("R")) and raises:
+                        self.raise_input = ""
+                    elif key in (ord("a"), ord("A")) and raises:
+                        self._apply_logged(self.human_player, raises[-1])
+                        self._advance()
 
             time.sleep(0.10)
 

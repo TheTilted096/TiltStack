@@ -2,7 +2,9 @@
 
 #include <coroutine>
 #include <exception>
+#include <map>
 #include <utility>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Per-thread coroutine frame pool
@@ -13,73 +15,75 @@
 // a single pointer pop and deallocation is a single pointer push — no locks,
 // no virtual dispatch, no fragmentation.
 //
-// All rollout() frames are the same size (same function, same locals), so
-// one list covers the entire workload.  Falls back to ::operator new only
-// on the first allocation of each distinct size.
+// A separate Bucket is maintained per distinct frame size, so coroutines of
+// different sizes (e.g. rollout vs traverse) each get their own free list
+// rather than one size locking out the others.
 // ---------------------------------------------------------------------------
-
-#include <vector>
 
 struct CoroFramePool {
     struct Node {
         Node *next;
     };
-    Node *head = nullptr;
 
-    std::size_t frameSize = 0;
-    std::vector<void *> allocatedChunks;
+    struct Bucket {
+        Node *head = nullptr;
+        std::vector<void *> chunks;
+        int allocCount = 0;
+    };
 
-    // Allocate 1024 frames per OS trip to guarantee cache locality
+    std::map<std::size_t, Bucket> buckets;
+
     static constexpr int CHUNK_SIZE = 1024;
 
     void *allocate(std::size_t n) {
-        // Lock the pool to the size of the first frame it sees
-        if (frameSize == 0)
-            frameSize = n;
+        Bucket &b = buckets[n];
+        b.allocCount++;
 
-        // Safety: If a different sized coroutine uses this pool, route to OS
-        // heap
-        if (n != frameSize)
-            return ::operator new(n);
-
-        // Fast Path: Pop from free list
-        if (head) {
-            Node *p = head;
-            head = head->next;
+        if (b.head) {
+            Node *p = b.head;
+            b.head = b.head->next;
             return p;
         }
 
-        // Slow Path (warmed up fast): Allocate a large contiguous slab
         char *chunk = static_cast<char *>(::operator new(CHUNK_SIZE * n));
-        allocatedChunks.push_back(chunk);
+        b.chunks.push_back(chunk);
 
-        // Chop the slab into frames and link them
         for (int i = 1; i < CHUNK_SIZE - 1; ++i) {
             Node *node = reinterpret_cast<Node *>(chunk + i * n);
             node->next = reinterpret_cast<Node *>(chunk + (i + 1) * n);
         }
         reinterpret_cast<Node *>(chunk + (CHUNK_SIZE - 1) * n)->next = nullptr;
 
-        head = reinterpret_cast<Node *>(chunk + n);
+        b.head = reinterpret_cast<Node *>(chunk + n);
         return chunk;
     }
 
     void deallocate(void *p, std::size_t n) noexcept {
-        if (n != frameSize) {
-            ::operator delete(p);
-            return;
-        }
-        // Push the reclaimed frame back onto the head of the free list
         auto *node = static_cast<Node *>(p);
-        node->next = head;
-        head = node;
+        node->next = buckets[n].head;
+        buckets[n].head = node;
     }
 
     ~CoroFramePool() {
-        // Free the massive contiguous chunks all at once
-        for (void *chunk : allocatedChunks) {
-            ::operator delete(chunk);
-        }
+        for (auto &[size, bucket] : buckets)
+            for (void *chunk : bucket.chunks)
+                ::operator delete(chunk);
+    }
+
+    struct Stats {
+        std::map<std::size_t, int> allSizes;
+    };
+
+    Stats getStats() const {
+        Stats s;
+        for (const auto &[sz, b] : buckets)
+            s.allSizes[sz] = b.allocCount;
+        return s;
+    }
+
+    void resetStats() {
+        for (auto &[sz, b] : buckets)
+            b.allocCount = 0;
     }
 };
 
@@ -101,7 +105,6 @@ template <typename T> class Task {
   public:
     struct promise_type {
         T value_{};
-        std::exception_ptr exception_{};
         std::coroutine_handle<> continuation_{};
 
         static void *operator new(std::size_t n) {
@@ -118,9 +121,7 @@ template <typename T> class Task {
         std::suspend_always initial_suspend() noexcept { return {}; }
         FinalAwaiter<promise_type> final_suspend() noexcept { return {}; }
         void return_value(T v) noexcept { value_ = std::move(v); }
-        void unhandled_exception() noexcept {
-            exception_ = std::current_exception();
-        }
+        void unhandled_exception() noexcept { std::terminate(); }
     };
 
     explicit Task(std::coroutine_handle<promise_type> h) noexcept
@@ -147,11 +148,7 @@ template <typename T> class Task {
         handle_.promise().continuation_ = caller;
         return handle_;
     }
-    T await_resume() {
-        if (handle_.promise().exception_)
-            std::rethrow_exception(handle_.promise().exception_);
-        return std::move(handle_.promise().value_);
-    }
+    T await_resume() { return std::move(handle_.promise().value_); }
 
   private:
     std::coroutine_handle<promise_type> handle_;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Coroutine.h"
 #include "Reservoir.h"
 #include "Scheduler.h"
 
@@ -53,6 +54,11 @@ class Orchestrator {
     // before harvesting training data for the next iteration, if needed.
     void clearBuffers();
 
+    // Returns per-thread pool stats collected at the end of the last
+    // waitIteration(). One entry per worker thread.
+    std::vector<CoroFramePool::Stats> getPoolStats() const;
+    void clearPoolStats();
+
   private:
     int numThreads_;
     uint64_t seed_;
@@ -78,9 +84,7 @@ class Orchestrator {
 
     std::vector<std::thread> threadPool_;
 
-    // Stores the first exception thrown by any worker thread during an
-    // iteration. Re-thrown by waitIteration() so Python sees it.
-    std::exception_ptr workerException_;
+    std::vector<CoroFramePool::Stats> poolStats_;
 
     void runWorker(int threadIdx);
 };

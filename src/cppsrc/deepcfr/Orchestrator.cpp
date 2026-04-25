@@ -55,16 +55,21 @@ void Orchestrator::waitIteration() {
     }
     // Release workers waiting on !iterReady_ so they can loop back to sleep.
     startCV_.notify_all();
-
-    // Re-throw any exception captured from a worker thread. Done after
-    // releasing workers so they are not left blocked on startCV_.
-    if (workerException_)
-        std::rethrow_exception(std::exchange(workerException_, nullptr));
 }
 
 void Orchestrator::clearBuffers() {
     for (Scheduler *s : schedulerPtrs)
         s->clearBuffers();
+}
+
+std::vector<CoroFramePool::Stats> Orchestrator::getPoolStats() const {
+    std::unique_lock lock(const_cast<std::mutex &>(mtx_));
+    return poolStats_;
+}
+
+void Orchestrator::clearPoolStats() {
+    std::unique_lock lock(mtx_);
+    poolStats_.clear();
 }
 
 void Orchestrator::runWorker(int threadIdx) {
@@ -95,38 +100,29 @@ void Orchestrator::runWorker(int threadIdx) {
         }
 
         sched.clearBuffers();
+        coroPool.resetStats();
 
-        try {
-            // Fill the initial pool.
-            for (int i = 0; i < POOL_SIZE; i++) {
-                CFRGame g;
-                g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
-                sched.spawn(DeepCFR::rollout(std::move(g), currentHero_,
-                                             currentT_, sched));
-            }
+        // Fill the initial pool.
+        for (int i = 0; i < POOL_SIZE; i++) {
+            CFRGame g;
+            g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
+            sched.spawn(
+                DeepCFR::rollout(std::move(g), currentHero_, currentT_, sched));
+        }
 
-            // Run until the sample quota is met and all active rollouts have
-            // drained.
-            while (sched.activeTasks() > 0) {
-                sched.runOneBatch();
-                int completed = sched.purgeCompleted();
-                if (sched.advReservoir->nSeen - nSeenAtStart_ <
-                    static_cast<std::size_t>(totalSamples_))
-                    for (int i = 0; i < completed; i++) {
-                        CFRGame g;
-                        g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
-                        sched.spawn(DeepCFR::rollout(std::move(g), currentHero_,
-                                                     currentT_, sched));
-                    }
-            }
-        } catch (...) {
-            // Store the first exception; subsequent ones are silently dropped
-            // since the iteration is already failed.
-            {
-                std::unique_lock lock(mtx_);
-                if (!workerException_)
-                    workerException_ = std::current_exception();
-            }
+        // Run until the sample quota is met and all active rollouts have
+        // drained.
+        while (sched.activeTasks() > 0) {
+            sched.runOneBatch();
+            int completed = sched.purgeCompleted();
+            if (sched.advReservoir->nSeen - nSeenAtStart_ <
+                static_cast<std::size_t>(totalSamples_))
+                for (int i = 0; i < completed; i++) {
+                    CFRGame g;
+                    g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
+                    sched.spawn(DeepCFR::rollout(std::move(g), currentHero_,
+                                                 currentT_, sched));
+                }
         }
 
         // Flush any data accumulated after the last flushBatch() — rollouts
@@ -138,6 +134,12 @@ void Orchestrator::runWorker(int threadIdx) {
             sched.polReservoir->insert(threadIdx, sched.policyInputs,
                                        sched.policyOutputs,
                                        &sched.policyWeights);
+
+        // Capture this thread's pool stats before signalling completion.
+        {
+            std::unique_lock lock(mtx_);
+            poolStats_.push_back(coroPool.getStats());
+        }
 
         // Always push the sentinel so Python's pop() loop is not left hanging,
         // regardless of whether the work block succeeded or threw.
