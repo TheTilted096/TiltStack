@@ -408,7 +408,6 @@ InfoSet CFRGame::getInfo() {
     info.potSize = static_cast<float>(cur.pot) / effStack;
     info.toCall = static_cast<float>(cur.toCall) / effStack;
     info.explicitSPR = std::min(info.myStack / info.potSize, 20.0f) / 20.0f;
-    info.currentEHS = streetEHS[roundNum][stm];
 
     std::memcpy(info.betHist, betHist, sizeof(betHist));
     info.betHistMask = betHistMask;
