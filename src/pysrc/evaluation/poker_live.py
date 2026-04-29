@@ -736,7 +736,7 @@ def main():
     parser.add_argument(
         "--clusters",
         default="clusters",
-        help="Path to clusters/ directory (required for EHS and bucket lookups)",
+        help="Path to clusters/ directory (required for bucket lookups)",
     )
     parser.add_argument(
         "--device",

@@ -2,7 +2,7 @@
 tilt_agents.py — OpenSpiel Bot wrappers for TiltStack evaluation.
 
 Each agent owns a deepcfr.CFRGame instance.  The CFRGame handles all feature
-extraction — card bitmasks, EHS lookup, cluster bucket lookup, stack/pot
+extraction — card bitmasks, cluster bucket lookup, stack/pot
 normalisation, and betting history — so the agents contain no parsing logic.
 
 Workflow inside step():
@@ -129,7 +129,7 @@ def _pad_to_9(deal_cards):
     Extend deal_cards to exactly 9 entries using the first unused card indices.
 
     hand_index_all() requires all 7 cards (per player) even for partial boards,
-    but the EHS / bucket values for unreached streets are gated by currentRound
+    but the bucket values for unreached streets are gated by currentRound
     inside CFRGame::getInfo() and never exposed to the network.
     """
     used = set(deal_cards[:9])
