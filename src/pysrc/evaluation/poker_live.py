@@ -306,7 +306,6 @@ class PokerLive:
         street = street_names[se.index(True)] if True in se else "?"
         se_str = " ".join("1" if b else "0" for b in se)  # one-hot bits
         pos = "BTN" if bool(rec["is_button"]) else "BB"
-        ehs = float(rec["current_ehs"]) * 100.0
 
         def _bkt(v):
             return str(int(v)) if v else "—"
@@ -354,7 +353,6 @@ class PokerLive:
         return [
             f"  │  Street: {street:<7}  [{se_str}]  Pos: {pos}",
             f"  │  Cards:  {cards_str}",
-            f"  │  EHS:    {ehs:.1f}%",
             f"  │  Buckets: {bkt_str}",
             f"  │  Stack:  Me:{my_norm:.4f}  Opp:{opp_norm:.4f}  (norm)",
             f"  │  Pot:{pot_norm:.4f}  ToCall:{tc_norm:.4f}  SPR:{spr:.4f}  (norm)",
