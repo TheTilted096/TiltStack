@@ -49,7 +49,6 @@ struct InfoSet {
 
     // 4-byte: normalised scalars and betting history
     float myStack, oppStack, potSize, toCall;
-    float currentEHS;
     float betHist[NUM_ROUNDS][MAX_ACTIONS];
 
     // 4-byte: bitmask marking used betHist slots.
@@ -65,16 +64,15 @@ struct InfoSet {
     bool isButton; // true if stm == 0
 
     // 4-byte: stack-to-pot ratio, clamped to [0,20] and normalised to [0,1].
-    // Occupies bytes 164-167, filling the former 5-byte trailing pad region.
     float explicitSPR;
 };
 
-static_assert(offsetof(InfoSet, betHist) == 52, "InfoSet layout changed");
-static_assert(offsetof(InfoSet, betHistMask) == 148, "InfoSet layout changed");
-static_assert(offsetof(InfoSet, streetBucket) == 152, "InfoSet layout changed");
-static_assert(offsetof(InfoSet, streetEmbed) == 158, "InfoSet layout changed");
-static_assert(offsetof(InfoSet, isButton) == 162, "InfoSet layout changed");
-static_assert(offsetof(InfoSet, explicitSPR) == 164, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, betHist) == 48, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, betHistMask) == 144, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, streetBucket) == 148, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, streetEmbed) == 154, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, isButton) == 158, "InfoSet layout changed");
+static_assert(offsetof(InfoSet, explicitSPR) == 160, "InfoSet layout changed");
 static_assert(sizeof(InfoSet) == 168, "InfoSet layout changed");
 
 struct BoardState {
