@@ -129,7 +129,7 @@ def main():
     parser.add_argument("--device", default="cpu", help="Torch device (cpu or cuda)")
     args = parser.parse_args()
 
-    # 1. Load cluster tables into CFRGame's global gEHS / gLabels arrays.
+    # 1. Load cluster tables into CFRGame's global gLabels arrays.
     #    Must happen before constructing any CFRGame (including inside agents).
     if not os.path.isdir(_clusters):
         sys.exit(f"Error: clusters directory not found at '{_clusters}'")

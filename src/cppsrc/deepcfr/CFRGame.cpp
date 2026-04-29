@@ -62,13 +62,10 @@ void CFRGame::indexCards(const Card deck[9]) {
             streetIDs[r][p] = indices[r];
     }
 
-    // Precompute EHS and cluster bucket for every street and player.
-    for (int r = 0; r < NUM_ROUNDS; r++) {
-        for (int p = 0; p < 2; p++) {
-            streetEHS[r][p] = gEHS[r][streetIDs[r][p]] / 65535.0f;
+    // Precompute cluster bucket for every street and player.
+    for (int r = 0; r < NUM_ROUNDS; r++)
+        for (int p = 0; p < 2; p++)
             streetBucket[r][p] = gLabels[r][streetIDs[r][p]];
-        }
-    }
 }
 
 void CFRGame::begin(int ss1, int ss2, bool h) {
@@ -408,7 +405,6 @@ InfoSet CFRGame::getInfo() {
     info.potSize = static_cast<float>(cur.pot) / effStack;
     info.toCall = static_cast<float>(cur.toCall) / effStack;
     info.explicitSPR = std::min(info.myStack / info.potSize, 20.0f) / 20.0f;
-    info.currentEHS = streetEHS[roundNum][stm];
 
     std::memcpy(info.betHist, betHist, sizeof(betHist));
     info.betHistMask = betHistMask;
@@ -445,12 +441,8 @@ InfoSet CFRGame::getInfo() {
 void loadTables(const std::string &clusters_dir) {
     const std::string d = clusters_dir + "/";
 
-    readU16File(d + "preflop_ehs_fine.bin", gEHS[0]);
-    readU16File(d + "flop_ehs_fine.bin", gEHS[1]);
-    readU16File(d + "turn_ehs_fine.bin", gEHS[2]);
-    readU16File(d + "river_ehs_fine.bin", gEHS[3]);
-
-    gLabels[0].resize(gEHS[0].size());
+    // Preflop has 169 canonical hands; identity mapping (label == hand index).
+    gLabels[0].resize(169);
     std::iota(gLabels[0].begin(), gLabels[0].end(), uint16_t{0});
 
     readU16File(d + "flop_labels.bin", gLabels[1]);

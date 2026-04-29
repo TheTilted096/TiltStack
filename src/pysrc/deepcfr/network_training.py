@@ -47,7 +47,7 @@ FLOP_BUCKETS = 2049  # 0 = unused, 1–2048 = flop cluster labels
 TURN_BUCKETS = 8193  # 0 = unused, 1–8192 = turn cluster labels
 RIVER_BUCKETS = 8193  # 0 = unused, 1–8192 = river cluster labels
 
-CONT_DIM = 4 * CARD_BITS + 5 + 4 * 6 + 4 * 6 + 4 + 1 + 1  # 208+5+24+24+4+1+1 = 267
+CONT_DIM = 4 * CARD_BITS + 4 + 4 * 6 + 4 * 6 + 4 + 1 + 1  # 208+4+24+24+4+1+1 = 266
 INPUT_DIM = CONT_DIM + NUM_STREETS * EMBED_DIM  # 266 + 96        = 362
 
 # ---------------------------------------------------------------------------
@@ -66,7 +66,6 @@ infoset_dtype = np.dtype(
             "opp_stack",
             "pot_size",
             "to_call",
-            "current_ehs",
             "bet_hist",
             "bet_hist_mask",
             "street_bucket",
@@ -82,14 +81,13 @@ infoset_dtype = np.dtype(
             "<f4",
             "<f4",
             "<f4",
-            "<f4",
-            "<f4",  # normalized scalars + EHS
+            "<f4",  # normalized scalars
             ("<f4", (4, 6)),  # betHist[NUM_ROUNDS][MAX_ACTIONS]
             "<u4",  # betHistMask (uint32, 24 LSBs used)
             ("<u2", 3),  # streetBucket[3]
             ("?", 4),  # streetEmbed[4]  (bool)
             "?",  # isButton         (bool)
-            "<f4",  # explicitSPR     (float, offset 164)
+            "<f4",  # explicitSPR     (float, offset 160)
         ],
         "offsets": [
             0,
@@ -100,13 +98,12 @@ infoset_dtype = np.dtype(
             36,
             40,
             44,  # my_stack, opp_stack, pot_size, to_call
-            48,  # current_ehs
-            52,  # bet_hist (96 bytes)
-            148,  # bet_hist_mask (4 bytes)
-            152,  # street_bucket (6 bytes)
-            158,  # street_embed (4 bytes)
-            162,  # is_button (1 byte)
-            164,  # explicit_spr (4 bytes, fills former trailing pad)
+            48,  # bet_hist (96 bytes)
+            144,  # bet_hist_mask (4 bytes)
+            148,  # street_bucket (6 bytes)
+            154,  # street_embed (4 bytes)
+            158,  # is_button (1 byte)
+            160,  # explicit_spr (4 bytes)
         ],
         "itemsize": 168,
     }
@@ -154,7 +151,7 @@ def decode_batch(raw: np.ndarray):
         parts.append(bits)  # (N, 52)
 
     # Normalized scalars
-    for field in ("my_stack", "opp_stack", "pot_size", "to_call", "current_ehs"):
+    for field in ("my_stack", "opp_stack", "pot_size", "to_call"):
         parts.append(batch[field].astype(np.float32).reshape(N, 1))
 
     # Betting history: (N, 4, 6) → (N, 24)
@@ -304,22 +301,22 @@ def decode_batch_gpu(raw_gpu: torch.Tensor):
     bits = ((cards_i64.unsqueeze(-1) >> shifts) & 1).float()
     bits = bits.view(N, 208)
 
-    # 2. Floats (Bytes 32-147): 29x 32-bit floats
-    floats = raw_gpu.view(torch.float32)[:, 8:37]
+    # 2. Floats (Bytes 32-143): 28x 32-bit floats (4 scalars + betHist[4][6])
+    floats = raw_gpu.view(torch.float32)[:, 8:36]
 
-    # 3. betHistMask (Bytes 148-151): uint32 → unpack 24 LSBs → (N, 24) float
-    mask_i32 = raw_gpu.view(torch.int32)[:, 37]  # (N,)
+    # 3. betHistMask (Bytes 144-147): uint32 → unpack 24 LSBs → (N, 24) float
+    mask_i32 = raw_gpu.view(torch.int32)[:, 36]  # (N,)
     shifts = torch.arange(24, device=raw_gpu.device, dtype=torch.int32)
     mask_bits = ((mask_i32.unsqueeze(1) >> shifts) & 1).float()  # (N, 24)
 
-    # 4. Bools (Bytes 158-162): streetEmbed[4] + isButton[1]
-    bools = raw_gpu[:, 158:163].float()
+    # 4. Bools (Bytes 154-158): streetEmbed[4] + isButton[1]
+    bools = raw_gpu[:, 154:159].float()
 
-    # 5. Buckets (Bytes 152-157): 3x 16-bit ints
-    buckets = raw_gpu.view(torch.int16)[:, 76:79].long()
+    # 5. Buckets (Bytes 148-153): 3x 16-bit ints
+    buckets = raw_gpu.view(torch.int16)[:, 74:77].long()
 
-    # 6. explicitSPR (Bytes 164-167): float32 at float index 41
-    explicit_spr = raw_gpu.view(torch.float32)[:, 41:42]
+    # 6. explicitSPR (Bytes 160-163): float32 at float index 40
+    explicit_spr = raw_gpu.view(torch.float32)[:, 40:41]
 
     x_cont = torch.cat([bits, floats, mask_bits, bools, explicit_spr], dim=1)
 

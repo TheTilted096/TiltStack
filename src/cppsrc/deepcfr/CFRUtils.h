@@ -38,24 +38,19 @@ inline thread_local RNG rng;
 
 // ---------------------------------------------------------------------------
 // Cluster tables — populate before constructing any CFRGame.
-// gEHS[r][idx] / 65535.0f  →  EHS for round r.
-// gLabels[r][idx]           →  cluster label for round r (index 0 unused).
+// gLabels[r][idx]  →  cluster label for round r (index 0 unused).
 // ---------------------------------------------------------------------------
 
-inline std::vector<uint16_t> gEHS[NUM_ROUNDS];
 inline std::vector<uint16_t> gLabels[NUM_ROUNDS];
 
 // ---------------------------------------------------------------------------
-// loadTables — populate gEHS and gLabels from the cluster pipeline output.
+// loadTables — populate gLabels from the cluster pipeline output.
 //
 // clusters_dir should contain:
-//   preflop_ehs_fine.bin  (169 uint16)
-//   flop_ehs_fine.bin     (1,286,792 uint16)   flop_labels.bin
-//   turn_ehs_fine.bin     (~13.5M uint16)       turn_labels.bin
-//   river_ehs_fine.bin    (~2.4B uint16)        river_labels.bin
+//   flop_labels.bin    turn_labels.bin    river_labels.bin
 //
-// Preflop has no clustering: gLabels[0] is populated with an identity mapping
-// (label == canonical hand index), covering all 169 hands directly.
+// Preflop has no clustering: gLabels[0] is an identity mapping over the
+// 169 canonical hand indices.
 //
 // Call once from the main thread before constructing any CFRGame.
 // ---------------------------------------------------------------------------

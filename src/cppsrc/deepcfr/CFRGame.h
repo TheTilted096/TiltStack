@@ -31,7 +31,6 @@ class CFRGame {
 
     float betHist[NUM_ROUNDS][MAX_ACTIONS];
     uint16_t streetBucket[NUM_ROUNDS][2];
-    float streetEHS[NUM_ROUNDS][2];
     hand_index_t streetIDs[NUM_ROUNDS][2];
     Card rawDeck[9];      // {p0h0, p0h1, p1h0, p1h1, f0, f1, f2, turn, river}
     uint32_t betHistMask; // mirrors InfoSet::betHistMask; maintained by
@@ -45,7 +44,7 @@ class CFRGame {
     // Initialise with explicitly provided cards rather than a random shuffle.
     // cards[9] = {p0h0, p0h1, p1h0, p1h1, flop0, flop1, flop2, turn, river}.
     // Unreached-street slots may be any unused card index in [0,51]; their
-    // EHS/bucket values are never read before that street is reached.
+    // bucket values are never read before that street is reached.
     void beginWithCards(int, int, bool, const Card cards[9]);
 
     int isTerminalState(const Action &);
@@ -81,8 +80,7 @@ class CFRGame {
     // and set up stacks / blinds / the initial BoardState.
     void initState(int ss1, int ss2, bool h);
 
-    // Index each player's 7-card hand and precompute EHS + cluster buckets for
-    // all streets.  deck[9] = {p0h0, p0h1, p1h0, p1h1, f0, f1, f2, turn,
-    // river}.
+    // Index each player's 7-card hand and precompute cluster buckets for all
+    // streets.  deck[9] = {p0h0, p0h1, p1h0, p1h1, f0, f1, f2, turn, river}.
     void indexCards(const Card deck[9]);
 };

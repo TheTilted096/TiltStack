@@ -56,7 +56,7 @@ PYBIND11_MODULE(deepcfr, m) {
     // Global initialisation — call once before constructing an Orchestrator.
     // -------------------------------------------------------------------------
     m.def("load_tables", &loadTables, py::arg("clusters_dir"),
-          "Load precomputed EHS and cluster-label tables from clusters_dir.");
+          "Load precomputed cluster-label tables from clusters_dir.");
 
     // -------------------------------------------------------------------------
     // CFRGame
@@ -76,7 +76,7 @@ PYBIND11_MODULE(deepcfr, m) {
         // card indices in [0,51], layout: [p0h0, p0h1, p1h0, p1h1, f0..f2, t,
         // r]. Unreached-street slots (turn/river when on flop) should be filled
         // with any unused card indices so hand_index_all can run cleanly;
-        // their EHS/bucket values are gated by currentRound in get_info().
+        // their bucket values are gated by currentRound in get_info().
         .def(
             "begin_with_cards",
             [](CFRGame &g, int ss1, int ss2, bool hero,
