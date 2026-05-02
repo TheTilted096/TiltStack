@@ -23,7 +23,7 @@ build/
 *.npy
 *.bin
 checkpoints/
-grpo_checkpoints/
+tpo_checkpoints/
 saves/
 runs/
 logs/

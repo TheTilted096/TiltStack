@@ -1,5 +1,5 @@
 """
-NLHE_GRPO.py — GRPO training against a fixed target policy.
+NLHE_GRPO.py — TPO training against a fixed target policy.
 
 A single hero policy network is trained from both seats simultaneously.
 Each iteration collects samples/2 advantage samples per seat, then trains
@@ -52,17 +52,18 @@ RESERVOIR_CAPACITY = 100_000_000
 # ---------------------------------------------------------------------------
 
 
-def train_grpo_policy(
+def train_tpo_policy(
     net: DeepCFRNet,
     optimizer: torch.optim.Optimizer,
     raw_inputs: np.ndarray,   # (N, INFOSET_BYTES) uint8
-    advantages: np.ndarray,   # (N, NUM_ACTIONS)   float32 -- Z-scores, NaN for illegal
-    old_policy: np.ndarray,   # (N, NUM_ACTIONS)   float32 -- pi_old at data-gen time
+    advantages: np.ndarray,   # (N, NUM_ACTIONS)   float32 -- raw milli-chip advantages, NaN for illegal
+    old_policy: np.ndarray,   # (N, NUM_ACTIONS)   float32 -- p_old (prior for target distribution q)
     epochs: int,
+    eta: float = 1.0,
     batch_size: int = 4096,
     device: torch.device = torch.device("cuda"),
-) -> tuple[list[float], list[float]]:
-    """Returns (losses, entropies) — one value per epoch."""
+) -> list[float]:
+    """Returns losses — one value per epoch."""
     N = (len(raw_inputs) // batch_size) * batch_size  # truncate to whole batches
     raw_pt = torch.from_numpy(raw_inputs[:N])
     adv_pt = torch.from_numpy(advantages[:N])
@@ -78,7 +79,6 @@ def train_grpo_policy(
     net.train()
     n_batches = N // batch_size
     losses = []
-    entropies = []
     for _ in range(epochs):
         perm = torch.randperm(N)
         raw_pinned.copy_(raw_pt[perm])
@@ -86,46 +86,44 @@ def train_grpo_policy(
         pol_pinned.copy_(pol_pt[perm])
 
         total_loss = torch.zeros(1, device=device)
-        total_entropy = torch.zeros(1, device=device)
         for start in range(0, N, batch_size):
             raw_b = raw_pinned[start : start + batch_size].to(device, non_blocking=True)
             adv_b = adv_pinned[start : start + batch_size].to(device, non_blocking=True)
             pol_b = pol_pinned[start : start + batch_size].to(device, non_blocking=True)
-            legal_mask = ~torch.isnan(adv_b)
-            std = adv_b[legal_mask].std() + 1e-8
-            adv_b = adv_b / std
             optimizer.zero_grad()
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 xc, b = decode_batch_gpu(raw_b)
                 logits = net(xc, b)
 
                 legal = ~torch.isnan(adv_b)
-                log_pi_new = F.log_softmax(logits.masked_fill(~legal, float("-inf")), dim=-1)
-                #ratio = torch.exp(log_pi_new - torch.log(pol_b.nan_to_num(1.0).clamp(min=1e-8)))
-
-                ratio = torch.exp(log_pi_new - torch.log(pol_b.nan_to_num(1.0).clamp(min=1e-5)))
-                ratio = ratio.clamp(max=10.0)
-
                 adv_clean = adv_b.nan_to_num(0.0)
-                eps = 0.2
-                obj = torch.min(
-                    ratio * adv_clean,
-                    ratio.clamp(1 - eps, 1 + eps) * adv_clean,
-                )
-                pi_new = torch.exp(log_pi_new)
-                entropy = -(pi_new * log_pi_new.masked_fill(~legal, 0.0)).sum(dim=-1).mean()
-                loss = -obj.sum(dim=-1).mean() - 0.1 * entropy
+
+                # Center advantages per row (per infoset) over legal actions only.
+                # This decouples the scale of raw milli-chip values from η so
+                # that η is a consistent sharpness parameter regardless of pot size.
+                n_legal = legal.float().sum(dim=-1, keepdim=True).clamp(min=1.0)
+                adv_mean = (adv_clean * legal.float()).sum(dim=-1, keepdim=True) / n_legal
+                u = (adv_clean - adv_mean).masked_fill(~legal, 0.0)
+
+                # Compute target distribution q analytically (fixed constant).
+                # q_i ∝ p_old_i * exp(u_i / η)
+                log_q = torch.log(pol_b.clamp(min=1e-8)) + u / eta
+                log_q = log_q.masked_fill(~legal, float("-inf"))
+                q = log_q.softmax(dim=-1)
+
+                # Cross-entropy loss: fit p^θ to q.
+                # log_pi is -inf at illegal positions; q is 0 there, but 0 * -inf = NaN
+                # in IEEE 754, so mask log_pi to 0 at illegal slots before multiplying.
+                log_pi = F.log_softmax(logits.masked_fill(~legal, float("-inf")), dim=-1)
+                loss = -(q.detach() * log_pi.masked_fill(~legal, 0.0)).sum(dim=-1).mean()
+
             loss.backward()
-
             torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=0.5)
-
             optimizer.step()
             total_loss += loss.detach()
-            total_entropy += entropy.detach()
 
         losses.append((total_loss / n_batches).item())
-        entropies.append((total_entropy / n_batches).item())
-    return losses, entropies
+    return losses
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +149,7 @@ def load_policy_net(path: str, device) -> DeepCFRNet:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="TiltStack GRPO training against a fixed target policy"
+        description="TiltStack TPO training against a fixed target policy"
     )
     parser.add_argument("--target", type=str, required=True)
     parser.add_argument("--iters", type=int, default=100)
@@ -160,6 +158,8 @@ def main():
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--eta", type=float, default=1.0,
+                        help="TPO temperature (lower = q more peaked toward best action)")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--eval_interval", type=int, default=10,
                         help="Evaluate every N iterations (0 to disable)")
@@ -172,15 +172,15 @@ def main():
 
     logs_dir = root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    log_path = logs_dir / f"grpo-{run_name}.txt"
+    log_path = logs_dir / f"tpo-{run_name}.txt"
 
     _term = sys.stdout
     _log = open(log_path, "w", buffering=1)
     sys.stdout = _log
 
     _term.write(
-        f"GRPO training started — output → logs/grpo-{run_name}.txt\n"
-        f"  target={args.target}  iters={args.iters}  samples={args.samples:,}\n"
+        f"TPO training started — output → logs/tpo-{run_name}.txt\n"
+        f"  target={args.target}  iters={args.iters}  samples={args.samples:,}  eta={args.eta}\n"
     )
 
     log_dir = root / "runs" / run_name
@@ -255,26 +255,25 @@ def main():
 
         # -- Policy training --------------------------------------------------
         train_t0 = time.perf_counter()
-        losses, entropies = train_grpo_policy(
+        losses = train_tpo_policy(
             hero_net,
             hero_opt,
             adv_res.inputs[:n],
             adv_res.targets[:n],
             pol_res.targets[:n],
             epochs=args.epochs,
+            eta=args.eta,
             batch_size=args.batch,
             device=device,
         )
         train_secs = time.perf_counter() - train_t0
 
         loss_last = losses[-1]
-        entropy_last = entropies[-1]
-        writer.add_scalar("grpo/loss", loss_last, global_step=t)
-        writer.add_scalar("grpo/entropy", entropy_last, global_step=t)
+        writer.add_scalar("tpo/loss", loss_last, global_step=t)
 
         ep_lines = "\n".join(
-            f"    ep{i+1}: loss={l:.4f}  H={h:.3f}"
-            for i, (l, h) in enumerate(zip(losses, entropies))
+            f"    ep{i+1}: loss={l:.4f}"
+            for i, l in enumerate(losses)
         )
         print(
             f"\n  [training]  {train_secs:.1f}s  ·  epochs={args.epochs}"
@@ -300,13 +299,13 @@ def main():
                 hero_net, villain_net, osp_game, device, args.eval_pairs,
                 p0_argmax=True, p1_argmax=False, p0_label="hero",
             )
-            writer.add_scalar("grpo/hero_edge_mbb", mbb, global_step=t)
+            writer.add_scalar("tpo/hero_edge_mbb", mbb, global_step=t)
             print(f"[{_ts()}]  Hero edge: {mbb:+.2f} +/- {ci95:.2f} mBB/hand")
 
-    ckpt_dir = root / "grpo_checkpoints"
+    ckpt_dir = root / "tpo_checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     date = time.strftime("%m%d%y")
-    ckpt_path = ckpt_dir / f"grpo{args.iters:04d}-{date}.pt"
+    ckpt_path = ckpt_dir / f"tpo{args.iters:04d}-{date}.pt"
     torch.save({"t": args.iters, "net": hero_net.state_dict()}, ckpt_path)
 
     msg = f"[{_ts()}] ==> Done.  Hero policy → {ckpt_path.name}"
