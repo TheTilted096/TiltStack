@@ -17,7 +17,8 @@ Action sampleAction(const Strategy &strat, const ActionList &moves,
 
 Strategy getInstantStrat(const Regrets &r, const ActionList &moves,
                          int numMoves) {
-    Strategy s{};
+    Strategy s;
+    s.fill(std::numeric_limits<float>::quiet_NaN());
     float sum = 0.0f;
 
     for (int i = 0; i < numMoves; i++) {

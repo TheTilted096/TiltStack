@@ -25,11 +25,46 @@ pipeline assigns labels 0-indexed, so CFRGame stores `label + 1` for reached
 streets and leaves unreached streets at their zero-initialised default.
 """
 
+import time as _time
+
 import deepcfr
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+# ---------------------------------------------------------------------------
+# Logging helpers
+# ---------------------------------------------------------------------------
+
+
+def _ts() -> str:
+    return _time.strftime("%H:%M:%S")
+
+
+def _fmt(n: int) -> str:
+    return f"{n:,}"
+
+
+def _rate(n: int, secs: float) -> str:
+    r = n / secs if secs > 0 else 0.0
+    if r >= 1e6:
+        return f"{r / 1e6:.1f}M/s"
+    if r >= 1e3:
+        return f"{r / 1e3:.1f}k/s"
+    return f"{r:.0f}/s"
+
+
+def _eta(secs: float) -> str:
+    s = int(secs)
+    h, rem = divmod(s, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h}h {m:02d}m {s:02d}s"
+    if m > 0:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
 
 # ---------------------------------------------------------------------------
 # Constants — must match CFRTypes.h
@@ -290,6 +325,10 @@ class Reservoir:
         """Number of valid (filled) entries: min(n_seen, capacity)."""
         return self._cpp.size()
 
+    def reset(self) -> None:
+        """Reset nSeen to zero for reuse across iterations."""
+        self._cpp.reset()
+
 
 def decode_batch_gpu(raw_gpu: torch.Tensor):
     """Decodes a raw (N, 168) uint8 tensor natively on the GPU."""
@@ -323,153 +362,62 @@ def decode_batch_gpu(raw_gpu: torch.Tensor):
     return x_cont, buckets
 
 
-# ---------------------------------------------------------------------------
-# Training
-# ---------------------------------------------------------------------------
-
-
-def train_advantage(
-    net: DeepCFRNet,
-    optimizer: torch.optim.Optimizer,
-    raw_inputs: np.ndarray,  # (N, INFOSET_BYTES) uint8
-    targets: np.ndarray,  # (N, NUM_ACTIONS)   float32 — true regrets
-    batch_size: int = 4096,
-    epochs: int = 1,
-    max_steps: int | None = None,
-    device: torch.device = torch.device("cuda"),
-) -> list[float]:
+def run_inference_loop(orch, device, nets, *, softmax: bool = False, hero=None):
     """
-    Train the advantage network with MSE loss on the regret targets.
-    Returns a list of per-epoch mean losses (epoch mode) or a single-element
-    list of mean loss over all steps (max_steps mode).
+    Drain inference batches from the orchestrator and route each sample to one
+    of two networks.
 
-    max_steps: if given, train exactly this many mini-batches, reshuffling
-    the dataset whenever it is exhausted.  Ignores the epochs argument.
-
-    Samples are shuffled via torch.randperm each epoch and sliced directly
-    from zero-copy numpy views into pre-allocated pinned staging buffers,
-    avoiding DataLoader multiprocessing overhead. Loss is accumulated as a
-    GPU tensor and synced once per epoch rather than once per batch.
+    Parameters
+    ----------
+    nets : [net_a, net_b]
+    softmax : if True, apply F.softmax to logits before writing output
+    hero : None  -> split by is_button (p0 -> nets[0], p1 -> nets[1])
+           bool  -> split by is_button == hero (hero -> nets[0], villain -> nets[1])
     """
-    N = len(raw_inputs)
-    raw_pt = torch.from_numpy(raw_inputs)
-    tgt_pt = torch.from_numpy(targets)
+    done = 0
+    while done < orch.num_threads():
+        first = orch.pop()
+        rest = orch.drain()
 
-    # Pinned staging buffers — allocated once, reused every batch.
-    raw_buf = torch.empty(
-        batch_size, raw_inputs.shape[1], dtype=torch.uint8, pin_memory=True
-    )
-    tgt_buf = torch.empty(
-        batch_size, targets.shape[1], dtype=torch.float32, pin_memory=True
-    )
+        scheds = []
+        for item in [first] + list(rest):
+            if item is None:
+                done += 1
+            else:
+                scheds.append(item)
 
-    net.train()
+        if not scheds:
+            continue
 
-    def _step(idx):
-        bs = len(idx)
-        raw_buf[:bs].copy_(raw_pt[idx])
-        tgt_buf[:bs].copy_(tgt_pt[idx])
-        raw_b = raw_buf[:bs].to(device, non_blocking=True)
-        t_b = tgt_buf[:bs].to(device, non_blocking=True)
-        optimizer.zero_grad()
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            xc, b = decode_batch_gpu(raw_b)
-            # Illegal actions are stored as NaN; exclude them from the loss so
-            # the network does not learn a spurious target of 0 for those slots.
-            mask = ~torch.isnan(t_b)
-            sq_err = ((net(xc, b) - t_b.nan_to_num(0.0)) * mask) ** 2
-            loss = sq_err.sum(dim=1).div(mask.sum(dim=1).clamp(min=1)).mean()
-        loss.backward()
-        optimizer.step()
-        return loss.detach()
+        sizes = [s.batch_size() for s in scheds]
+        raws = [np.array(s.input_data(), copy=False) for s in scheds]
+        raw_cat = np.concatenate(raws, axis=0) if len(raws) > 1 else raws[0]
 
-    if max_steps is not None:
-        total = torch.zeros(1, device=device)
-        steps_done = 0
-        perm = torch.randperm(N)
-        pos = 0
-        while steps_done < max_steps:
-            if pos >= N:
-                perm = torch.randperm(N)
-                pos = 0
-            idx = perm[pos : pos + batch_size]
-            pos += batch_size
-            total += _step(idx)
-            steps_done += 1
-        return [(total / steps_done).item()]
+        x_cont, buckets = decode_batch_gpu(
+            torch.from_numpy(raw_cat).to(device, non_blocking=True)
+        )
 
-    losses = []
-    for _ in range(epochs):
-        perm = torch.randperm(N)
-        total = torch.zeros(1, device=device)
-        n_batches = 0
-        for start in range(0, N, batch_size):
-            idx = perm[start : start + batch_size]
-            total += _step(idx)
-            n_batches += 1
-        losses.append((total / n_batches).item())
+        struct = raw_cat.ravel().view(infoset_dtype)
+        is_button = struct["is_button"]
+        mask_b = (is_button == hero) if hero is not None else ~is_button
+        idx_a = np.where(~mask_b)[0]
+        idx_b = np.where(mask_b)[0]
 
-    return losses
+        out = np.empty((raw_cat.shape[0], NUM_ACTIONS), dtype=np.float32)
+
+        with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            for idx, net in ((idx_a, nets[0]), (idx_b, nets[1])):
+                if len(idx) == 0:
+                    continue
+                logits = net(x_cont[idx], buckets[idx])
+                out[idx] = (
+                    F.softmax(logits, dim=1) if softmax else logits
+                ).float().cpu().numpy()
+
+        offset = 0
+        for s, sz in zip(scheds, sizes):
+            s.output_data()[:] = out[offset : offset + sz]
+            s.submit_batch()
+            offset += sz
 
 
-def policy_trainer(
-    net: DeepCFRNet,
-    optimizer: torch.optim.Optimizer,
-    raw_inputs: np.ndarray,  # (N, INFOSET_BYTES) uint8
-    targets: np.ndarray,  # (N, NUM_ACTIONS)   float32 — instant strategy
-    weights: np.ndarray,  # (N,)               int32   — iteration t
-    batch_size: int = 4096,
-    device: torch.device = torch.device("cuda"),
-):
-    """
-    Generator that trains the strategy network with iteration-weighted
-    cross-entropy loss, yielding (ep, mean_loss, elapsed_secs) after each
-    epoch.  Runs indefinitely — the caller breaks when done.
-
-    Pinned staging buffers are allocated once at generator start and reused
-    across all epochs.
-    """
-    import time as _time
-
-    N = len(raw_inputs)
-    raw_pt = torch.from_numpy(raw_inputs)
-    tgt_pt = torch.from_numpy(targets)
-    wt_pt = torch.from_numpy(weights.astype(np.float32))
-
-    raw_buf = torch.empty(
-        batch_size, raw_inputs.shape[1], dtype=torch.uint8, pin_memory=True
-    )
-    tgt_buf = torch.empty(
-        batch_size, targets.shape[1], dtype=torch.float32, pin_memory=True
-    )
-    wt_buf = torch.empty(batch_size, dtype=torch.float32, pin_memory=True)
-
-    net.train()
-    ep = 0
-    while True:
-        ep += 1
-        ep_t0 = _time.perf_counter()
-        perm = torch.randperm(N)
-        total = torch.zeros(1, device=device)
-        n_batches = 0
-        for start in range(0, N, batch_size):
-            idx = perm[start : start + batch_size]
-            bs = len(idx)
-            raw_buf[:bs].copy_(raw_pt[idx])
-            tgt_buf[:bs].copy_(tgt_pt[idx])
-            wt_buf[:bs].copy_(wt_pt[idx])
-            raw_b = raw_buf[:bs].to(device, non_blocking=True)
-            t_b = tgt_buf[:bs].to(device, non_blocking=True)
-            wt_b = wt_buf[:bs].to(device, non_blocking=True)
-            optimizer.zero_grad()
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                xc, b = decode_batch_gpu(raw_b)
-                wt_b = wt_b / wt_b.mean()
-                log_probs = F.log_softmax(net(xc, b), dim=1)
-                per_sample = -(t_b * log_probs).sum(dim=1)
-                loss = (wt_b * per_sample).mean()
-            loss.backward()
-            optimizer.step()
-            total += loss.detach()
-            n_batches += 1
-        yield ep, (total / n_batches).item(), _time.perf_counter() - ep_t0

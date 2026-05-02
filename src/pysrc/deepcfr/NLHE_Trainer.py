@@ -37,20 +37,24 @@ import subprocess
 from pathlib import Path
 import numpy as np
 import torch
-from tb_launch import launch_tb
+import torch.nn.functional as F
+from tb_launch import launch_tb, stop_tb
 
 import deepcfr
 from network_training import (
     DeepCFRNet,
     Reservoir,
-    train_advantage,
-    policy_trainer,
+    run_inference_loop,
     decode_batch_gpu,
     verify_layout,
     infoset_dtype,
     NUM_ACTIONS,
     CONT_DIM,
     NUM_STREETS,
+    _ts,
+    _fmt,
+    _rate,
+    _eta,
 )
 
 
@@ -58,36 +62,122 @@ RESERVOIR_CAPACITY = 100_000_000
 
 
 # ---------------------------------------------------------------------------
-# Logging helpers
+# Training
 # ---------------------------------------------------------------------------
 
 
-def _ts() -> str:
-    return time.strftime("%H:%M:%S")
+def train_advantage(
+    net: DeepCFRNet,
+    optimizer: torch.optim.Optimizer,
+    raw_inputs: np.ndarray,
+    targets: np.ndarray,
+    batch_size: int = 4096,
+    epochs: int = 1,
+    max_steps: int | None = None,
+    device: torch.device = torch.device("cuda"),
+) -> list[float]:
+    N = len(raw_inputs)
+    raw_pt = torch.from_numpy(raw_inputs)
+    tgt_pt = torch.from_numpy(targets)
+
+    raw_buf = torch.empty(batch_size, raw_inputs.shape[1], dtype=torch.uint8, pin_memory=True)
+    tgt_buf = torch.empty(batch_size, targets.shape[1], dtype=torch.float32, pin_memory=True)
+
+    net.train()
+
+    def _step(idx):
+        bs = len(idx)
+        raw_buf[:bs].copy_(raw_pt[idx])
+        tgt_buf[:bs].copy_(tgt_pt[idx])
+        raw_b = raw_buf[:bs].to(device, non_blocking=True)
+        t_b = tgt_buf[:bs].to(device, non_blocking=True)
+        optimizer.zero_grad()
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            xc, b = decode_batch_gpu(raw_b)
+            mask = ~torch.isnan(t_b)
+            sq_err = ((net(xc, b) - t_b.nan_to_num(0.0)) * mask) ** 2
+            loss = sq_err.sum(dim=1).div(mask.sum(dim=1).clamp(min=1)).mean()
+        loss.backward()
+        optimizer.step()
+        return loss.detach()
+
+    if max_steps is not None:
+        total = torch.zeros(1, device=device)
+        steps_done = 0
+        perm = torch.randperm(N)
+        pos = 0
+        while steps_done < max_steps:
+            if pos >= N:
+                perm = torch.randperm(N)
+                pos = 0
+            idx = perm[pos : pos + batch_size]
+            pos += batch_size
+            total += _step(idx)
+            steps_done += 1
+        return [(total / steps_done).item()]
+
+    losses = []
+    for _ in range(epochs):
+        perm = torch.randperm(N)
+        total = torch.zeros(1, device=device)
+        n_batches = 0
+        for start in range(0, N, batch_size):
+            idx = perm[start : start + batch_size]
+            total += _step(idx)
+            n_batches += 1
+        losses.append((total / n_batches).item())
+
+    return losses
 
 
-def _fmt(n: int) -> str:
-    return f"{n:,}"
+def policy_trainer(
+    net: DeepCFRNet,
+    optimizer: torch.optim.Optimizer,
+    raw_inputs: np.ndarray,
+    targets: np.ndarray,
+    weights: np.ndarray,
+    batch_size: int = 4096,
+    device: torch.device = torch.device("cuda"),
+):
+    N = len(raw_inputs)
+    raw_pt = torch.from_numpy(raw_inputs)
+    tgt_pt = torch.from_numpy(targets)
+    wt_pt = torch.from_numpy(weights.astype(np.float32))
 
+    raw_buf = torch.empty(batch_size, raw_inputs.shape[1], dtype=torch.uint8, pin_memory=True)
+    tgt_buf = torch.empty(batch_size, targets.shape[1], dtype=torch.float32, pin_memory=True)
+    wt_buf = torch.empty(batch_size, dtype=torch.float32, pin_memory=True)
 
-def _rate(n: int, secs: float) -> str:
-    r = n / secs if secs > 0 else 0.0
-    if r >= 1e6:
-        return f"{r / 1e6:.1f}M/s"
-    if r >= 1e3:
-        return f"{r / 1e3:.1f}k/s"
-    return f"{r:.0f}/s"
-
-
-def _eta(secs: float) -> str:
-    s = int(secs)
-    h, rem = divmod(s, 3600)
-    m, s = divmod(rem, 60)
-    if h > 0:
-        return f"{h}h {m:02d}m {s:02d}s"
-    if m > 0:
-        return f"{m}m {s:02d}s"
-    return f"{s}s"
+    net.train()
+    ep = 0
+    while True:
+        ep += 1
+        ep_t0 = time.perf_counter()
+        perm = torch.randperm(N)
+        total = torch.zeros(1, device=device)
+        n_batches = 0
+        for start in range(0, N, batch_size):
+            idx = perm[start : start + batch_size]
+            bs = len(idx)
+            raw_buf[:bs].copy_(raw_pt[idx])
+            tgt_buf[:bs].copy_(tgt_pt[idx])
+            wt_buf[:bs].copy_(wt_pt[idx])
+            raw_b = raw_buf[:bs].to(device, non_blocking=True)
+            t_b = tgt_buf[:bs].to(device, non_blocking=True)
+            wt_b = wt_buf[:bs].to(device, non_blocking=True)
+            optimizer.zero_grad()
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                xc, b = decode_batch_gpu(raw_b)
+                wt_b = wt_b / wt_b.mean()
+                legal = ~torch.isnan(t_b)
+                log_probs = F.log_softmax(net(xc, b).masked_fill(~legal, float("-inf")), dim=1)
+                per_sample = -(t_b.nan_to_num(0.0) * log_probs).sum(dim=1)
+                loss = (wt_b * per_sample).mean()
+            loss.backward()
+            optimizer.step()
+            total += loss.detach()
+            n_batches += 1
+        yield ep, (total / n_batches).item(), time.perf_counter() - ep_t0
 
 
 # ---------------------------------------------------------------------------
@@ -176,62 +266,6 @@ def _run_menu(ctrl: TrainingControl, term) -> None:
                     term.write(f"  -> policy epochs set to {val}\n")
                     print(f"[{_ts()}]  [ctrl] policy epochs set to {val}", flush=True)
         term.flush()
-
-
-# ---------------------------------------------------------------------------
-# Inference loop
-# ---------------------------------------------------------------------------
-
-
-def run_inference_loop(orch, adv_nets, device):
-    done = 0
-    while done < orch.num_threads():
-        # Block until at least one batch is ready, then drain any additional
-        # batches that are already waiting — all get fused into one GPU call.
-        first = orch.pop()
-        rest = orch.drain()
-
-        scheds = []
-        for item in [first] + list(rest):
-            if item is None:
-                done += 1
-            else:
-                scheds.append(item)
-
-        if not scheds:
-            continue
-
-        sizes = [s.batch_size() for s in scheds]
-        raws = [np.array(s.input_data(), copy=False) for s in scheds]
-        raw_cat = np.concatenate(raws, axis=0) if len(raws) > 1 else raws[0]
-
-        x_cont, buckets = decode_batch_gpu(
-            torch.from_numpy(raw_cat).to(device, non_blocking=True)
-        )
-
-        struct = raw_cat.ravel().view(infoset_dtype)
-        is_p0_acting = struct["is_button"]
-
-        p0_idx = np.where(is_p0_acting)[0]
-        p1_idx = np.where(~is_p0_acting)[0]
-
-        out = np.empty((raw_cat.shape[0], NUM_ACTIONS), dtype=np.float32)
-
-        with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            if len(p0_idx) > 0:
-                out[p0_idx] = (
-                    adv_nets[0](x_cont[p0_idx], buckets[p0_idx]).float().cpu().numpy()
-                )
-            if len(p1_idx) > 0:
-                out[p1_idx] = (
-                    adv_nets[1](x_cont[p1_idx], buckets[p1_idx]).float().cpu().numpy()
-                )
-
-        offset = 0
-        for s, sz in zip(scheds, sizes):
-            s.output_data()[:] = out[offset : offset + sz]
-            s.submit_batch()
-            offset += sz
 
 
 # ---------------------------------------------------------------------------
@@ -327,11 +361,7 @@ def main():
         _log.flush()
         _log.close()
         sys.stdout = _term
-        tb_proc.terminate()
-        try:
-            tb_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            tb_proc.kill()
+        stop_tb(tb_proc)
         os._exit(code)
 
     # ---- Training control + menu thread -------------------------------------
@@ -401,7 +431,7 @@ def main():
 
             t0 = time.perf_counter()
             orch.start_iteration(hero, t, args.samples)
-            run_inference_loop(orch, adv_nets, device)
+            run_inference_loop(orch, device, adv_nets)
             orch.wait_iteration()
             rollout_secs = time.perf_counter() - t0
 

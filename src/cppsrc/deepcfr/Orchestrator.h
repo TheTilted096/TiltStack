@@ -4,6 +4,8 @@
 #include "Reservoir.h"
 #include "Scheduler.h"
 
+enum class TraversalMode { CFR, GRPO };
+
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -24,7 +26,8 @@ class Orchestrator {
     // polReservoir collects policy data from both sides.
     // All three must remain valid for the lifetime of the Orchestrator.
     Orchestrator(int numThreads, Reservoir *advRes0, Reservoir *advRes1,
-                 Reservoir *polRes, uint64_t seed = 0xdeadbeefcafe1234ULL);
+                 Reservoir *polRes, uint64_t seed = 0xdeadbeefcafe1234ULL,
+                 TraversalMode mode = TraversalMode::CFR);
     ~Orchestrator();
 
     // Signal all threads to exit and join them.
@@ -65,6 +68,7 @@ class Orchestrator {
 
     Reservoir *advReservoirs_[2];
     Reservoir *polReservoir_;
+    TraversalMode mode_;
 
     // Per-iteration parameters written by startIteration(), read by workers
     // while holding mtx_ at wakeup.

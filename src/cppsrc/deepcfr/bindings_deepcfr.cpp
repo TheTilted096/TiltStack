@@ -270,24 +270,27 @@ PYBIND11_MODULE(deepcfr, m) {
                                    return r.nSeen.load(
                                        std::memory_order_relaxed);
                                })
-        .def("size", &Reservoir::size);
+        .def("size", &Reservoir::size)
+        .def("reset", &Reservoir::reset);
 
     // -------------------------------------------------------------------------
     // Orchestrator
     // -------------------------------------------------------------------------
     py::class_<Orchestrator>(m, "Orchestrator")
         .def(py::init([](int numThreads, Reservoir &advRes0, Reservoir &advRes1,
-                         py::object polResObj, uint64_t seed) {
+                         py::object polResObj, uint64_t seed, bool grpo) {
                  Reservoir *polPtr = polResObj.is_none()
                                          ? nullptr
                                          : &polResObj.cast<Reservoir &>();
+                 TraversalMode mode = grpo ? TraversalMode::GRPO : TraversalMode::CFR;
                  return new Orchestrator(numThreads, &advRes0, &advRes1, polPtr,
-                                         seed);
+                                         seed, mode);
              }),
              py::keep_alive<1, 2>(), py::keep_alive<1, 3>(),
              py::arg("num_threads"), py::arg("adv_res0"), py::arg("adv_res1"),
              py::arg("pol_res") = py::none(),
-             py::arg("seed") = (uint64_t)0xdeadbeefcafe1234ULL)
+             py::arg("seed") = (uint64_t)0xdeadbeefcafe1234ULL,
+             py::arg("grpo") = false)
 
         .def_readonly("schedulers", &Orchestrator::schedulerPtrs,
                       py::return_value_policy::reference_internal)

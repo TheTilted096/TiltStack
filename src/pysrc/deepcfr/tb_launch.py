@@ -6,6 +6,8 @@ TensorBoard is launched as a subprocess with stdout/stderr redirected to
 terminal.  The subprocess is terminated automatically when the parent exits.
 """
 
+import os
+import signal
 import sys
 import subprocess
 from pathlib import Path
@@ -34,3 +36,23 @@ def launch_tb(
         start_new_session=True,
     )
     return SummaryWriter(log_dir=str(log_dir)), proc
+
+
+def stop_tb(proc: subprocess.Popen, timeout: int = 5) -> None:
+    """Kill TensorBoard and all its worker subprocesses.
+
+    proc.terminate() only kills the top-level process; TensorBoard's gRPC
+    workers are in the same process group (start_new_session=True makes the
+    TB pid the group leader) so os.killpg reaches them all.
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGTERM)
+        proc.wait(timeout=timeout)
+    except ProcessLookupError:
+        pass  # already gone
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass

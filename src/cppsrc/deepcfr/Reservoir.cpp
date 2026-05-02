@@ -19,6 +19,10 @@ Reservoir::Reservoir(std::size_t capacity, int numThreads, uint8_t *inputBuf,
     }
 }
 
+void Reservoir::reset() {
+    nSeen.store(0, std::memory_order_relaxed);
+}
+
 std::size_t Reservoir::size() const {
     return std::min(nSeen.load(std::memory_order_relaxed), capacity_);
 }

@@ -2,11 +2,13 @@
 #include "CFRGame.h"
 #include "CFRUtils.h"
 #include "DeepCFR.h"
+#include "GRPO.h"
 
 Orchestrator::Orchestrator(int numThreads, Reservoir *advRes0,
-                           Reservoir *advRes1, Reservoir *polRes, uint64_t seed)
+                           Reservoir *advRes1, Reservoir *polRes, uint64_t seed,
+                           TraversalMode mode)
     : numThreads_(numThreads), seed_(seed), advReservoirs_{advRes0, advRes1},
-      polReservoir_(polRes) {
+      polReservoir_(polRes), mode_(mode) {
     // g_indexer is initialised by loadTables(), which callers must invoke
     // before constructing an Orchestrator.
 
@@ -96,7 +98,8 @@ void Orchestrator::runWorker(int threadIdx) {
             if (shutdown_)
                 break;
             sched.advReservoir = advReservoirs_[currentHero_];
-            sched.polReservoir = (currentT_ > 50) ? polReservoir_ : nullptr;
+            sched.polReservoir = (mode_ == TraversalMode::GRPO || currentT_ > 50)
+                                     ? polReservoir_ : nullptr;
         }
 
         sched.clearBuffers();
@@ -106,8 +109,10 @@ void Orchestrator::runWorker(int threadIdx) {
         for (int i = 0; i < POOL_SIZE; i++) {
             CFRGame g;
             g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
-            sched.spawn(
-                DeepCFR::rollout(std::move(g), currentHero_, currentT_, sched));
+            if (mode_ == TraversalMode::GRPO)
+                sched.spawn(GRPO::rollout(std::move(g), currentHero_, sched));
+            else
+                sched.spawn(DeepCFR::rollout(std::move(g), currentHero_, currentT_, sched));
         }
 
         // Run until the sample quota is met and all active rollouts have
@@ -120,8 +125,11 @@ void Orchestrator::runWorker(int threadIdx) {
                 for (int i = 0; i < completed; i++) {
                     CFRGame g;
                     g.begin(STARTING_STACK, STARTING_STACK, currentHero_);
-                    sched.spawn(DeepCFR::rollout(std::move(g), currentHero_,
-                                                 currentT_, sched));
+                    if (mode_ == TraversalMode::GRPO)
+                        sched.spawn(GRPO::rollout(std::move(g), currentHero_, sched));
+                    else
+                        sched.spawn(DeepCFR::rollout(std::move(g), currentHero_,
+                                                     currentT_, sched));
                 }
         }
 

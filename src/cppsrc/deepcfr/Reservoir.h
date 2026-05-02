@@ -67,6 +67,10 @@ class Reservoir {
     // Number of valid entries in the buffer: min(nSeen, capacity).
     std::size_t size() const;
 
+    // Reset to initial state for reuse across iterations.
+    // Must not be called while worker threads are active.
+    void reset();
+
   private:
     std::size_t capacity_;
     int numThreads_;
