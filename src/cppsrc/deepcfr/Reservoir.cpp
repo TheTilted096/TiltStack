@@ -3,7 +3,7 @@
 #include <cstring>
 
 Reservoir::Reservoir(std::size_t capacity, int numThreads, uint8_t *inputBuf,
-                     float *targetBuf, int32_t *weightBuf)
+                     float *targetBuf, float *weightBuf)
     : capacity_(capacity), numThreads_(numThreads),
       sliceSize_(capacity / static_cast<std::size_t>(numThreads)),
       inputBuf_(inputBuf), targetBuf_(targetBuf), weightBuf_(weightBuf),
@@ -28,7 +28,7 @@ std::size_t Reservoir::size() const {
 }
 
 void Reservoir::writeSlot(std::size_t dst, const uint8_t *inputBase,
-                          const float *targetBase, const int32_t *weightBase,
+                          const float *targetBase, const float *weightBase,
                           std::size_t bIdx) {
     std::memcpy(inputBuf_ + dst * sizeof(InfoSet),
                 inputBase + bIdx * sizeof(InfoSet), sizeof(InfoSet));
@@ -40,7 +40,7 @@ void Reservoir::writeSlot(std::size_t dst, const uint8_t *inputBase,
 
 void Reservoir::insert(int threadID, const std::vector<InfoSet> &inputs,
                        const std::vector<Regrets> &targets,
-                       const std::vector<int32_t> *weights) {
+                       const std::vector<float> *weights) {
     const std::size_t B = inputs.size();
     if (B == 0)
         return;
@@ -53,7 +53,7 @@ void Reservoir::insert(int threadID, const std::vector<InfoSet> &inputs,
 
     const uint8_t *inData = reinterpret_cast<const uint8_t *>(inputs.data());
     const float *tgtData = reinterpret_cast<const float *>(targets.data());
-    const int32_t *wgtData = weights ? weights->data() : nullptr;
+    const float *wgtData = weights ? weights->data() : nullptr;
 
     // ---- Phase 1: fill empty slots directly --------------------------------
     // Slots [base, fillEnd) are uniquely owned by this call — no other

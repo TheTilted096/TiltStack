@@ -58,16 +58,18 @@ def train_tpo_policy(
     raw_inputs: np.ndarray,   # (N, INFOSET_BYTES) uint8
     advantages: np.ndarray,   # (N, NUM_ACTIONS)   float32 -- raw milli-chip advantages, NaN for illegal
     old_policy: np.ndarray,   # (N, NUM_ACTIONS)   float32 -- p_old (prior for target distribution q)
+    weights: np.ndarray,      # (N,)               float32 -- hero reach probability at each infoset
     epochs: int,
     eta: float = 1.0,
     batch_size: int = 4096,
     device: torch.device = torch.device("cuda"),
-) -> list[float]:
-    """Returns losses — one value per epoch."""
+) -> tuple[list[float], list[float], list[float]]:
+    """Returns (losses, kls, entropies) — one value per epoch."""
     N = (len(raw_inputs) // batch_size) * batch_size  # truncate to whole batches
     raw_pt = torch.from_numpy(raw_inputs[:N])
     adv_pt = torch.from_numpy(advantages[:N])
     pol_pt = torch.from_numpy(old_policy[:N])
+    wgt_pt = torch.from_numpy(weights[:N])
 
     # Single pinned buffers sized to the full (truncated) dataset.
     # Each epoch shuffles the source data into these once; batches are then
@@ -75,21 +77,26 @@ def train_tpo_policy(
     raw_pinned = torch.empty(N, raw_inputs.shape[1], dtype=torch.uint8, pin_memory=True)
     adv_pinned = torch.empty(N, NUM_ACTIONS, dtype=torch.float32, pin_memory=True)
     pol_pinned = torch.empty(N, NUM_ACTIONS, dtype=torch.float32, pin_memory=True)
+    wgt_pinned = torch.empty(N,              dtype=torch.float32, pin_memory=True)
 
     net.train()
     n_batches = N // batch_size
-    losses = []
+    losses, kls, entropies = [], [], []
     for _ in range(epochs):
         perm = torch.randperm(N)
         raw_pinned.copy_(raw_pt[perm])
         adv_pinned.copy_(adv_pt[perm])
         pol_pinned.copy_(pol_pt[perm])
+        wgt_pinned.copy_(wgt_pt[perm])
 
         total_loss = torch.zeros(1, device=device)
+        total_kl   = torch.zeros(1, device=device)
+        total_ent  = torch.zeros(1, device=device)
         for start in range(0, N, batch_size):
             raw_b = raw_pinned[start : start + batch_size].to(device, non_blocking=True)
             adv_b = adv_pinned[start : start + batch_size].to(device, non_blocking=True)
             pol_b = pol_pinned[start : start + batch_size].to(device, non_blocking=True)
+            wgt_b = wgt_pinned[start : start + batch_size].to(device, non_blocking=True)
             optimizer.zero_grad()
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 xc, b = decode_batch_gpu(raw_b)
@@ -98,16 +105,17 @@ def train_tpo_policy(
                 legal = ~torch.isnan(adv_b)
                 adv_clean = adv_b.nan_to_num(0.0)
 
-                # Center advantages per row (per infoset) over legal actions only.
-                # This decouples the scale of raw milli-chip values from η so
-                # that η is a consistent sharpness parameter regardless of pot size.
+                # Center then RMS-normalize per row (per infoset) over legal actions.
                 n_legal = legal.float().sum(dim=-1, keepdim=True).clamp(min=1.0)
                 adv_mean = (adv_clean * legal.float()).sum(dim=-1, keepdim=True) / n_legal
                 u = (adv_clean - adv_mean).masked_fill(~legal, 0.0)
+                u_std = (u.pow(2).sum(dim=-1, keepdim=True) / n_legal).sqrt().clamp(min=1e-4)
+                u_normalized = u / u_std
 
                 # Compute target distribution q analytically (fixed constant).
-                # q_i ∝ p_old_i * exp(u_i / η)
-                log_q = torch.log(pol_b.clamp(min=1e-8)) + u / eta
+                # q_i ∝ p_old_i * exp(u_normalized_i / η)
+                log_p_old = torch.log(pol_b.nan_to_num(1.0).clamp(min=1e-8))
+                log_q = log_p_old + u_normalized / eta
                 log_q = log_q.masked_fill(~legal, float("-inf"))
                 q = log_q.softmax(dim=-1)
 
@@ -115,15 +123,29 @@ def train_tpo_policy(
                 # log_pi is -inf at illegal positions; q is 0 there, but 0 * -inf = NaN
                 # in IEEE 754, so mask log_pi to 0 at illegal slots before multiplying.
                 log_pi = F.log_softmax(logits.masked_fill(~legal, float("-inf")), dim=-1)
-                loss = -(q.detach() * log_pi.masked_fill(~legal, 0.0)).sum(dim=-1).mean()
+                per_sample = -(q.detach() * log_pi.masked_fill(~legal, 0.0)).sum(dim=-1)
+                w = wgt_b / wgt_b.sum().clamp(min=1e-8)
+                loss = (w * per_sample).sum()
+
+                # Diagnostics: track how well p_θ is learning to match q.
+                with torch.no_grad():
+                    pi = log_pi.exp()
+                    log_pi_safe = log_pi.masked_fill(~legal, 0.0)
+                    log_q_dist = torch.log(q.clamp(min=1e-8)).masked_fill(~legal, 0.0)
+                    entropy = (w * -(pi * log_pi_safe).sum(dim=-1)).sum()         # H(p_θ)
+                    kl = (w * (pi * (log_pi_safe - log_q_dist)).sum(dim=-1)).sum() # KL(p_θ ‖ q)
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=0.5)
             optimizer.step()
             total_loss += loss.detach()
+            total_kl   += kl.detach()
+            total_ent  += entropy.detach()
 
         losses.append((total_loss / n_batches).item())
-    return losses
+        kls.append((total_kl / n_batches).item())
+        entropies.append((total_ent / n_batches).item())
+    return losses, kls, entropies
 
 
 # ---------------------------------------------------------------------------
@@ -152,18 +174,18 @@ def main():
         description="TiltStack TPO training against a fixed target policy"
     )
     parser.add_argument("--target", type=str, required=True)
-    parser.add_argument("--iters", type=int, default=100)
-    parser.add_argument("--samples", type=int, default=10_000)
+    parser.add_argument("--iters", type=int, default=400)
+    parser.add_argument("--samples", type=int, default=100_000)
     parser.add_argument("--batch", type=int, default=16384)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--eta", type=float, default=1.0,
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--eta", type=float, default=1.2,
                         help="TPO temperature (lower = q more peaked toward best action)")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--eval_interval", type=int, default=10,
                         help="Evaluate every N iterations (0 to disable)")
-    parser.add_argument("--eval_pairs", type=int, default=50_000,
+    parser.add_argument("--eval_pairs", type=int, default=100_000,
                         help="Duplicate pairs per evaluation match")
     args = parser.parse_args()
 
@@ -220,7 +242,7 @@ def main():
     osp_game = pyspiel.load_game(GAME_STRING) if args.eval_interval > 0 else None
 
     adv_res = Reservoir(RESERVOIR_CAPACITY, args.threads, deepcfr.INFOSET_BYTES)
-    pol_res = Reservoir(RESERVOIR_CAPACITY, args.threads, deepcfr.INFOSET_BYTES)
+    pol_res = Reservoir(RESERVOIR_CAPACITY, args.threads, deepcfr.INFOSET_BYTES, has_weights=True)
     orch = deepcfr.Orchestrator(
         args.threads, adv_res._cpp, adv_res._cpp, pol_res._cpp, seed=seed, grpo=True
     )
@@ -255,12 +277,13 @@ def main():
 
         # -- Policy training --------------------------------------------------
         train_t0 = time.perf_counter()
-        losses = train_tpo_policy(
+        losses, kls, entropies = train_tpo_policy(
             hero_net,
             hero_opt,
             adv_res.inputs[:n],
             adv_res.targets[:n],
             pol_res.targets[:n],
+            pol_res.weights[:n],
             epochs=args.epochs,
             eta=args.eta,
             batch_size=args.batch,
@@ -268,12 +291,13 @@ def main():
         )
         train_secs = time.perf_counter() - train_t0
 
-        loss_last = losses[-1]
-        writer.add_scalar("tpo/loss", loss_last, global_step=t)
+        writer.add_scalar("tpo/loss",    losses[-1],    global_step=t)
+        writer.add_scalar("tpo/kl",      kls[-1],       global_step=t)
+        writer.add_scalar("tpo/entropy", entropies[-1], global_step=t)
 
         ep_lines = "\n".join(
-            f"    ep{i+1}: loss={l:.4f}"
-            for i, l in enumerate(losses)
+            f"    ep{i+1}: loss={l:.4f}  kl={k:.4f}  H={h:.4f}"
+            for i, (l, k, h) in enumerate(zip(losses, kls, entropies))
         )
         print(
             f"\n  [training]  {train_secs:.1f}s  ·  epochs={args.epochs}"

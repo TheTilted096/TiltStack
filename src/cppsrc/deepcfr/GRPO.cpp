@@ -2,10 +2,10 @@
 
 Task<float> GRPO::rollout(CFRGame game, bool hero, Scheduler &sched) {
     // game is owned by this frame for the lifetime of the traversal.
-    co_return co_await traverse(game, hero, sched);
+    co_return co_await traverse(game, hero, 1.0f, sched);
 }
 
-Task<float> GRPO::traverse(CFRGame &game, bool hero, Scheduler &sched) {
+Task<float> GRPO::traverse(CFRGame &game, bool hero, float heroReach, Scheduler &sched) {
     if (game.isTerminal)
         co_return game.payout();
 
@@ -44,7 +44,8 @@ Task<float> GRPO::traverse(CFRGame &game, bool hero, Scheduler &sched) {
         for (int i = 0; i < numMoves; i++) {
             int actionInt = static_cast<int>(moves[i]);
             game.makeMove(moves[i]);
-            actionUtils[actionInt] = co_await traverse(game, hero, sched);
+            actionUtils[actionInt] = co_await traverse(game, hero,
+                heroReach * instantStrategy[actionInt], sched);
             game.unmakeMove();
             nodeEV += instantStrategy[actionInt] * actionUtils[actionInt];
         }
@@ -58,14 +59,14 @@ Task<float> GRPO::traverse(CFRGame &game, bool hero, Scheduler &sched) {
         sched.advantageOutputs.push_back(trueRegret);
         sched.policyInputs.push_back(game.getInfo());
         sched.policyOutputs.push_back(instantStrategy);
-        sched.policyWeights.push_back(1);
+        sched.policyWeights.push_back(heroReach);
 
         co_return nodeEV;
     }
 
     Action villainMove = DeepCFR::sampleAction(instantStrategy, moves, numMoves);
     game.makeMove(villainMove);
-    nodeEV = co_await traverse(game, hero, sched);
+    nodeEV = co_await traverse(game, hero, heroReach, sched);
     game.unmakeMove();
 
     co_return nodeEV;

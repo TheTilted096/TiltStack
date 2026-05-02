@@ -231,8 +231,8 @@ PYBIND11_MODULE(deepcfr, m) {
         .def("policy_weight_data",
              [](py::object self) {
                  auto &s = self.cast<Scheduler &>();
-                 return asArray1D<int>(s.policyWeightData(), s.policySize(),
-                                       self);
+                 return asArray1D<float>(s.policyWeightData(), s.policySize(),
+                                        self);
              })
 
         // -- Rollout counter --------------------------------------------------
@@ -253,11 +253,11 @@ PYBIND11_MODULE(deepcfr, m) {
                          py::array_t<uint8_t, py::array::c_style> inputs,
                          py::array_t<float, py::array::c_style> targets,
                          py::object weights) {
-                 int32_t *wptr = nullptr;
+                 float *wptr = nullptr;
                  if (!weights.is_none())
                      wptr =
                          weights
-                             .cast<py::array_t<int32_t, py::array::c_style>>()
+                             .cast<py::array_t<float, py::array::c_style>>()
                              .mutable_data();
                  return new Reservoir(capacity, numThreads,
                                       inputs.mutable_data(),

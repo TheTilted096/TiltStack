@@ -310,7 +310,7 @@ class Reservoir:
         self.capacity = capacity
         self.inputs = np.empty((capacity, infoset_bytes), dtype=np.uint8)
         self.targets = np.empty((capacity, NUM_ACTIONS), dtype=np.float32)
-        self.weights = np.empty(capacity, dtype=np.int32) if has_weights else None
+        self.weights = np.empty(capacity, dtype=np.float32) if has_weights else None
         self._cpp = deepcfr.Reservoir(
             capacity, num_threads, self.inputs, self.targets, self.weights
         )

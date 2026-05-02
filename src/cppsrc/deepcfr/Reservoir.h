@@ -50,7 +50,7 @@ class Reservoir {
     // (uint8) targetBuf  : caller-owned buffer of capacity × NUM_ACTIONS floats
     // weightBuf  : caller-owned buffer of capacity int32s; nullptr if unused
     Reservoir(std::size_t capacity, int numThreads, uint8_t *inputBuf,
-              float *targetBuf, int32_t *weightBuf = nullptr);
+              float *targetBuf, float *weightBuf = nullptr);
 
     // Lock-free batch insert. threadID must be in [0, numThreads).
     //
@@ -59,7 +59,7 @@ class Reservoir {
     // Pass &policyWeights for policy reservoirs; nullptr (default) for adv.
     void insert(int threadID, const std::vector<InfoSet> &inputs,
                 const std::vector<Regrets> &targets,
-                const std::vector<int32_t> *weights = nullptr);
+                const std::vector<float> *weights = nullptr);
 
     // Total items ever offered across all threads (not clamped to capacity).
     std::atomic<std::size_t> nSeen{0};
@@ -79,13 +79,13 @@ class Reservoir {
 
     uint8_t *inputBuf_;  // Python-owned
     float *targetBuf_;   // Python-owned
-    int32_t *weightBuf_; // Python-owned (nullptr if no weights)
+    float *weightBuf_; // Python-owned (nullptr if no weights)
 
     // Per-thread local item counts for Algorithm R stream positions.
     // Only thread i ever touches seenPerThread_[i], so no atomic needed.
     std::vector<PaddedCounter> seenPerThread_;
 
     void writeSlot(std::size_t dst, const uint8_t *inputBase,
-                   const float *targetBase, const int32_t *weightBase,
+                   const float *targetBase, const float *weightBase,
                    std::size_t bIdx);
 };

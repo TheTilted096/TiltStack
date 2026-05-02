@@ -68,7 +68,7 @@ class Scheduler {
 
     std::vector<InfoSet> policyInputs;
     std::vector<Strategy> policyOutputs;
-    std::vector<int> policyWeights;
+    std::vector<float> policyWeights;
 
     int completedRollouts = 0;
     int rolloutCount() const { return completedRollouts; }
@@ -108,7 +108,7 @@ class Scheduler {
 
     InfoSet *policyInputData() { return policyInputs.data(); }
     Strategy *policyOutputData() { return policyOutputs.data(); }
-    int *policyWeightData() { return policyWeights.data(); }
+    float *policyWeightData() { return policyWeights.data(); }
     int policySize() { return static_cast<int>(policyInputs.size()); }
 
     // Reset all replay buffers. Called by the worker at the start of each
