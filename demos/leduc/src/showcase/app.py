@@ -85,6 +85,12 @@ OPPONENT_DESC = {
     "Aggressive":    "Bets and raises constantly regardless of hand strength.",
 }
 
+CARD_LABELS = {
+    JACK: "J",
+    QUEEN: "Q",
+    KING: "K",
+}
+
 def build_opponent_vector(profile: str):
     if profile == "Tight":
         return build_tight_strategy_vector()
@@ -138,13 +144,14 @@ section.main > div                 { padding-top: 1.5rem; }
 
 /* Metric cards */
 [data-testid="metric-container"] {
-    background: #1a1d27;
-    border: 1px solid #2a2d3a;
-    border-radius: 10px;
+    background: linear-gradient(160deg, #161a24 0%, #131722 100%);
+    border: 1px solid #2f3548;
+    border-radius: 12px;
     padding: 1rem 1.2rem;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
 }
 [data-testid="stMetricValue"]  { color: #e8eaf0 !important; font-size: 2rem !important; }
-[data-testid="stMetricLabel"]  { color: #888fa8 !important; }
+[data-testid="stMetricLabel"]  { color: #9ca3bc !important; }
 [data-testid="stMetricDelta"]  { font-size: 1rem !important; }
 
 /* Progress bar color */
@@ -152,17 +159,65 @@ section.main > div                 { padding-top: 1.5rem; }
 
 /* Button */
 .stButton > button {
-    background: #4ecdc4; color: #0f1117;
+    background: linear-gradient(135deg, #d4af37 0%, #f5d46d 100%);
+    color: #11141e;
     font-weight: 700; border: none; border-radius: 8px;
     padding: 0.6rem 2rem; font-size: 1rem;
     width: 100%;
+    box-shadow: 0 4px 14px rgba(212, 175, 55, 0.28);
 }
-.stButton > button:hover { background: #38b2ac; }
+.stButton > button:hover { filter: brightness(0.96); }
 
 h1 { color: #e8eaf0 !important; }
 h2, h3 { color: #c8cad8 !important; }
 p, li  { color: #888fa8 !important; }
 label  { color: #c8cad8 !important; }
+
+.casino-table {
+    background: radial-gradient(circle at top, #214233 0%, #173328 42%, #111b18 100%);
+    border: 1px solid #785d1b;
+    border-radius: 18px;
+    padding: 1.1rem 1rem 0.9rem 1rem;
+    margin-bottom: 0.9rem;
+    box-shadow: inset 0 0 0 1px rgba(245, 212, 109, 0.12), 0 14px 30px rgba(0, 0, 0, 0.35);
+}
+.casino-title {
+    color: #f5d46d;
+    font-size: 0.92rem;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+}
+.card-pill {
+    display: inline-block;
+    min-width: 2.2rem;
+    text-align: center;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    margin-left: 0.35rem;
+    font-weight: 700;
+    background: #f7f8fb;
+    color: #1a1d27;
+}
+.chip-pill {
+    display: inline-block;
+    padding: 0.22rem 0.6rem;
+    border-radius: 999px;
+    margin-right: 0.35rem;
+    margin-top: 0.25rem;
+    border: 1px solid #9a7a25;
+    color: #f5d46d;
+    background: rgba(10, 13, 20, 0.42);
+    font-size: 0.84rem;
+}
+.dealer-log {
+    background: #141a26;
+    border: 1px solid #2f3548;
+    border-radius: 12px;
+    padding: 0.65rem 0.75rem;
+    min-height: 8rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -211,6 +266,13 @@ if "trained" not in st.session_state:
     st.session_state.expl_hands   = []
     st.session_state.sim_done     = False
     st.session_state.last_opponent = None
+    st.session_state.play_bankroll = 0
+    st.session_state.play_hands = 0
+    st.session_state.play_hand_active = False
+    st.session_state.play_h = None
+    st.session_state.play_cards = None
+    st.session_state.play_log = []
+    st.session_state.play_last_delta = 0
 
 # Reset if opponent changed
 if st.session_state.last_opponent != opponent:
@@ -220,6 +282,48 @@ if st.session_state.last_opponent != opponent:
     st.session_state.expl_hands  = []
     st.session_state.br_strategy = None
     st.session_state.last_opponent = opponent
+
+
+def _new_table_hand(rng):
+    p0 = int(rng.integers(0, 3))
+    p1 = int(rng.integers(0, 3))
+    comm = int(rng.integers(0, 3))
+    st.session_state.play_h = p0 * 8
+    st.session_state.play_cards = [p0, p1, comm]
+    st.session_state.play_log = ["New hand dealt."]
+    st.session_state.play_hand_active = True
+
+
+def _move_label(h, action):
+    if action == Action.CHECK:
+        return "Fold" if _raises(h) > 0 else "Check"
+    if action == Action.BET:
+        return "Call"
+    return "Raise"
+
+
+def _apply_table_action(action):
+    h = st.session_state.play_h
+    cards = st.session_state.play_cards
+    cur = _stm(h)
+    actor = "You" if cur == 0 else "Dealer"
+    label = _move_label(h, action)
+    st.session_state.play_log.append(f"{actor}: {label}")
+
+    if _ends_hand(h, action):
+        pay = _payout(h, action, cards[1 - cur])
+        user_delta = pay if cur == 0 else -pay
+        st.session_state.play_last_delta = int(user_delta)
+        st.session_state.play_bankroll += int(user_delta)
+        st.session_state.play_hands += 1
+        st.session_state.play_hand_active = False
+        st.session_state.play_log.append(
+            f"Hand over. You {'won' if user_delta > 0 else 'lost' if user_delta < 0 else 'pushed'} {user_delta:+d} chips."
+        )
+        return
+
+    ns = _next_stm(h, action)
+    st.session_state.play_h = _next_hash(h, action, cards[2], cards[ns])
 
 # ─────────────────────────────────────────────────────────────
 # Phase 1: Train GTO
@@ -429,3 +533,88 @@ else:
         st.session_state.expl_hands  = expl_hands
         st.session_state.sim_done    = True
         st.rerun()
+
+# ─────────────────────────────────────────────────────────────
+# Phase 3: Play at the table
+# ─────────────────────────────────────────────────────────────
+st.divider()
+st.markdown("### Casino Table — Play vs Dealer")
+
+if not st.session_state.trained:
+    st.info("Train the model in Step 1 to unlock table play.")
+else:
+    rng_table = np.random.default_rng(int(time.time()) % (2**32 - 1))
+
+    top_a, top_b, top_c = st.columns([2, 2, 3])
+    with top_a:
+        st.metric("Your Bankroll", f"{st.session_state.play_bankroll:+d} chips")
+    with top_b:
+        st.metric("Hands Played", f"{st.session_state.play_hands}")
+    with top_c:
+        st.caption("Classic heads-up Leduc table with clean casino styling.")
+
+    if not st.session_state.play_hand_active:
+        if st.button("Deal New Hand"):
+            _new_table_hand(rng_table)
+            st.rerun()
+    else:
+        h = st.session_state.play_h
+        cards = st.session_state.play_cards
+        round_id = _bet_round(h) + 1
+        pot_scale = 2 + 2 * _raises(h) + (4 if _bet_round(h) == 1 else 0)
+
+        table_left, table_right = st.columns([3, 2])
+        with table_left:
+            board = CARD_LABELS[cards[2]] if _bet_round(h) == 1 else "?"
+            st.markdown(
+                (
+                    "<div class='casino-table'>"
+                    "<div class='casino-title'>Main Table</div>"
+                    f"<span class='chip-pill'>Round {round_id}</span>"
+                    f"<span class='chip-pill'>Pot Pressure: {pot_scale} chips</span>"
+                    "<p><strong>Your Card:</strong><span class='card-pill'>"
+                    f"{CARD_LABELS[cards[0]]}"
+                    "</span></p>"
+                    "<p><strong>Board:</strong><span class='card-pill'>"
+                    f"{board}"
+                    "</span></p>"
+                    "<p><strong>Dealer Card:</strong><span class='card-pill'>?</span></p>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+
+        with table_right:
+            st.markdown("<div class='dealer-log'>", unsafe_allow_html=True)
+            st.markdown("**Dealer Log**")
+            for entry in st.session_state.play_log[-6:]:
+                st.caption(entry)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # Dealer acts automatically until it's your turn or the hand ends.
+        guard = 0
+        while st.session_state.play_hand_active and _stm(st.session_state.play_h) == 1 and guard < 6:
+            guard += 1
+            h_bot = st.session_state.play_h
+            if st.session_state.br_strategy is not None:
+                bot_action = _br_action(st.session_state.br_strategy, h_bot, rng_table)
+            else:
+                bot_action = gto_action(st.session_state.strategies, h_bot, rng_table)
+            _apply_table_action(bot_action)
+
+        if st.session_state.play_hand_active and _stm(st.session_state.play_h) == 0:
+            st.markdown("**Your move**")
+            h_user = st.session_state.play_h
+            legal = _legal_moves(h_user)
+            cols = st.columns(len(legal))
+            for idx, action in enumerate(legal):
+                if cols[idx].button(_move_label(h_user, action), key=f"user_action_{idx}_{h_user}"):
+                    _apply_table_action(action)
+                    st.rerun()
+
+        if not st.session_state.play_hand_active:
+            cards = st.session_state.play_cards
+            st.success(
+                f"Showdown: You `{CARD_LABELS[cards[0]]}` vs Dealer `{CARD_LABELS[cards[1]]}` "
+                f"(Board `{CARD_LABELS[cards[2]]}`) · Result {st.session_state.play_last_delta:+d} chips"
+            )
