@@ -24,6 +24,11 @@ from demo_vs_tight import (
     build_tight_strategy_vector, compute_exploit_strategy,
     JACK, QUEEN, KING,
 )
+from classifier import (
+    OpponentClassifier, ActionTracker,
+    LABEL_NAMES, LABEL_COLORS, LABEL_ICONS,
+    load_classifier,
+)
 
 # ─────────────────────────────────────────────────────────────
 # Opponent profiles
@@ -267,12 +272,21 @@ if "trained" not in st.session_state:
     st.session_state.sim_done     = False
     st.session_state.last_opponent = None
     st.session_state.play_bankroll = 0
-    st.session_state.play_hands = 0
+    st.session_state.play_hands    = 0
+    st.session_state.play_wins     = 0
     st.session_state.play_hand_active = False
-    st.session_state.play_h = None
-    st.session_state.play_cards = None
-    st.session_state.play_log = []
-    st.session_state.play_last_delta = 0
+    st.session_state.play_h        = None
+    st.session_state.play_cards    = None
+    st.session_state.play_log      = []
+    st.session_state.play_last_delta  = 0
+    st.session_state.table_rng_seed   = 0
+    st.session_state.last_showdown    = None   # persists after hand ends
+    # Layer 2: opponent classifier
+    st.session_state.clf            = None   # OpponentClassifier (loaded lazily)
+    st.session_state.tracker        = ActionTracker()
+    st.session_state.clf_result     = None   # (label, confidence, probs) or None
+    st.session_state.auto_opponent  = None   # detected profile driving dealer strategy
+    st.session_state.detected_br    = None   # cached BRSolver strategy for detected profile
 
 # Reset if opponent changed
 if st.session_state.last_opponent != opponent:
@@ -285,13 +299,17 @@ if st.session_state.last_opponent != opponent:
 
 
 def _new_table_hand(rng):
-    p0 = int(rng.integers(0, 3))
-    p1 = int(rng.integers(0, 3))
-    comm = int(rng.integers(0, 3))
-    st.session_state.play_h = p0 * 8
+    # Deal 3 distinct ranks (same rank can't appear twice — no pair without community match)
+    ranks = rng.choice(3, size=3, replace=False).tolist()
+    p0, p1, comm = int(ranks[0]), int(ranks[1]), int(ranks[2])
+    st.session_state.play_h     = p0 * 8
     st.session_state.play_cards = [p0, p1, comm]
-    st.session_state.play_log = ["New hand dealt."]
+    st.session_state.play_log   = ["New hand dealt."]
     st.session_state.play_hand_active = True
+    # Advance the seed so each deal is fresh
+    st.session_state.table_rng_seed += 1
+    # Start tracking this hand for the classifier
+    st.session_state.tracker.start_hand()
 
 
 def _move_label(h, action):
@@ -303,27 +321,72 @@ def _move_label(h, action):
 
 
 def _apply_table_action(action):
-    h = st.session_state.play_h
+    h     = st.session_state.play_h
     cards = st.session_state.play_cards
-    cur = _stm(h)
+    cur   = _stm(h)
     actor = "You" if cur == 0 else "Dealer"
     label = _move_label(h, action)
     st.session_state.play_log.append(f"{actor}: {label}")
+
+    # Record the judge's action for classifier training
+    if cur == 0:
+        st.session_state.tracker.record_action(
+            action_label=label,
+            raises_before=_raises(h),
+            round_id=_bet_round(h) + 1,
+        )
 
     if _ends_hand(h, action):
         pay = _payout(h, action, cards[1 - cur])
         user_delta = pay if cur == 0 else -pay
         st.session_state.play_last_delta = int(user_delta)
-        st.session_state.play_bankroll += int(user_delta)
-        st.session_state.play_hands += 1
+        st.session_state.play_bankroll  += int(user_delta)
+        st.session_state.play_hands     += 1
+        if user_delta > 0:
+            st.session_state.play_wins  += 1
+        # Showdown = hand ends without a fold
+        went_to_showdown = (label != "Fold")
+        st.session_state.tracker.end_hand(went_to_showdown)
+        # Re-classify after every completed hand
+        _update_classification()
         st.session_state.play_hand_active = False
         st.session_state.play_log.append(
             f"Hand over. You {'won' if user_delta > 0 else 'lost' if user_delta < 0 else 'pushed'} {user_delta:+d} chips."
         )
+        # Persist showdown info so it stays visible after rerun
+        st.session_state.last_showdown = {
+            "cards": list(cards),   # [p0, p1, comm]
+            "delta": int(user_delta),
+            "showdown": went_to_showdown,
+        }
         return
 
     ns = _next_stm(h, action)
     st.session_state.play_h = _next_hash(h, action, cards[2], cards[ns])
+
+
+def _update_classification() -> None:
+    """Run the classifier after a hand completes and cache the result."""
+    clf = st.session_state.get("clf")
+    if clf is None:
+        # Lazy-load (blocks once, ~1–2 s on first hand)
+        clf = load_classifier()
+        st.session_state.clf = clf
+    result = clf.predict(st.session_state.tracker)
+    if result is not None:
+        label, conf, probs = result
+        st.session_state.clf_result    = (label, conf, probs)
+        # After 5 hands with ≥ 70 % confidence, auto-switch dealer opponent profile.
+        # Recompute the BRSolver for the new detected profile only when it changes.
+        if st.session_state.tracker.n_hands >= 5 and conf >= 0.70:
+            prev = st.session_state.get("auto_opponent")
+            st.session_state.auto_opponent = label
+            if label != prev and st.session_state.br_strategy is not None:
+                opp_vec = build_opponent_vector(label)
+                br_live = BRSolver()
+                br_live.load_strategy(opp_vec)
+                br_live.compute(0)
+                st.session_state.detected_br = br_live.get_full_br_strategy()
 
 # ─────────────────────────────────────────────────────────────
 # Phase 1: Train GTO
@@ -538,83 +601,324 @@ else:
 # Phase 3: Play at the table
 # ─────────────────────────────────────────────────────────────
 st.divider()
-st.markdown("### Casino Table — Play vs Dealer")
+
+# ── Section header with architecture flow ─────────────────────
+st.markdown("""
+<div style='margin-bottom:0.6rem'>
+  <span style='color:#e8eaf0;font-size:1.3rem;font-weight:700'>🃏 Play the Dealer — Watch TiltStack Adapt</span><br>
+  <span style='color:#888fa8;font-size:0.88rem'>
+    Every hand you play is fed into the 3-layer pipeline in real time.
+  </span>
+</div>
+""", unsafe_allow_html=True)
 
 if not st.session_state.trained:
-    st.info("Train the model in Step 1 to unlock table play.")
+    st.info("Complete Step 1 (Train CFR+) first to unlock table play.")
 else:
-    rng_table = np.random.default_rng(int(time.time()) % (2**32 - 1))
+    rng_table   = np.random.default_rng(st.session_state.table_rng_seed)
+    dealer_mode = "Exploit" if st.session_state.br_strategy is not None else "GTO"
 
-    top_a, top_b, top_c = st.columns([2, 2, 3])
+    clf_result    = st.session_state.get("clf_result")
+    auto_opponent = st.session_state.get("auto_opponent")
+    n_tracked     = st.session_state.tracker.n_hands
+    LOCK_THRESHOLD = 5   # hands before strategy locks in
+
+    # ── Architecture pipeline display ─────────────────────────────────────────
+    # Always visible — shows what stage TiltStack is at right now.
+    L1_done  = st.session_state.trained
+    L2_done  = clf_result is not None
+    L2_locked = auto_opponent is not None
+    L3_done  = L2_locked
+
+    def _pipe_node(num, label, sublabel, done, locked=False, color="#4ecdc4"):
+        if locked:
+            bg, border, tc = "rgba(78,44,132,0.35)", "#7c3aed", "#c4b5fd"
+        elif done:
+            bg, border, tc = f"rgba(0,0,0,0.25)", f"{color}55", color
+        else:
+            bg, border, tc = "rgba(0,0,0,0.15)", "#2f3548", "#555d75"
+        icon = "✓" if (done and not locked) else ("🔒" if locked else "○")
+        return (
+            f"<div style='flex:1;background:{bg};border:1px solid {border};"
+            f"border-radius:10px;padding:0.6rem 0.8rem;text-align:center'>"
+            f"<div style='color:{tc};font-size:1.1rem;font-weight:700'>{icon} L{num}</div>"
+            f"<div style='color:{tc};font-size:0.82rem;font-weight:600;margin-top:2px'>{label}</div>"
+            f"<div style='color:#555d75;font-size:0.72rem;margin-top:2px'>{sublabel}</div>"
+            f"</div>"
+        )
+
+    l2_sublabel = (
+        f"Locked: {auto_opponent}" if L2_locked
+        else (f"Reading… {n_tracked}/{LOCK_THRESHOLD} hands" if L2_done else f"{n_tracked}/3 hands")
+    )
+    l3_sublabel = f"Exploiting {auto_opponent}" if L3_done else "Waiting for L2"
+
+    pipe_html = (
+        "<div style='display:flex;gap:0.5rem;align-items:stretch;margin-bottom:0.9rem'>"
+        + _pipe_node(1, "CFR+ Nash",   "Equilibrium trained",      L1_done,  color="#4ecdc4")
+        + "<div style='display:flex;align-items:center;color:#2f3548;font-size:1.2rem;padding:0 2px'>→</div>"
+        + _pipe_node(2, "LSTM Classify", l2_sublabel,              L2_done,  L2_locked, color="#f5d46d")
+        + "<div style='display:flex;align-items:center;color:#2f3548;font-size:1.2rem;padding:0 2px'>→</div>"
+        + _pipe_node(3, "BRSolver",    l3_sublabel,                L3_done,  color="#ff6b6b")
+        + "</div>"
+    )
+    st.markdown(pipe_html, unsafe_allow_html=True)
+
+    # ── Classifier confidence panel (shows from hand 1) ───────────────────────
+    if n_tracked == 0 and not st.session_state.play_hand_active:
+        st.markdown(
+            "<div style='background:rgba(245,212,109,0.06);border:1px solid #3a3010;"
+            "border-radius:10px;padding:0.65rem 1rem;margin-bottom:0.7rem;"
+            "color:#888fa8;font-size:0.88rem'>"
+            "🧠 <strong style='color:#c8cad8'>Layer 2 will read your play style</strong> — "
+            "raise aggressively, call everything, or play tight. "
+            "After 3 hands it produces a live classification. After 5 hands it locks in and "
+            "Layer 3 (BRSolver) recomputes an exploit strategy specifically for you."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    elif clf_result is not None:
+        det_label, det_conf, det_probs = clf_result
+        det_idx   = LABEL_NAMES.index(det_label)
+        det_color = LABEL_COLORS[det_idx]
+        det_icon  = LABEL_ICONS[det_idx]
+
+        # Build confidence bar rows
+        bars_html = ""
+        for i, (lname, lcolor) in enumerate(zip(LABEL_NAMES, LABEL_COLORS)):
+            pct  = det_probs[i] * 100
+            bold = "font-weight:700;" if i == det_idx else ""
+            bars_html += (
+                f"<div style='display:flex;align-items:center;gap:0.5rem;margin-bottom:4px'>"
+                f"<div style='color:{lcolor};font-size:0.75rem;width:4.5rem;{bold}'>{lname}</div>"
+                f"<div style='flex:1;background:#1e2130;border-radius:4px;height:8px'>"
+                f"<div style='width:{pct:.0f}%;background:{lcolor};height:8px;border-radius:4px'></div>"
+                f"</div>"
+                f"<div style='color:{lcolor};font-size:0.75rem;width:2.5rem;text-align:right;{bold}'>{pct:.0f}%</div>"
+                f"</div>"
+            )
+
+        status_line = (
+            f"<span style='color:#7c3aed;font-weight:700'>🔒 LOCKED IN — Strategy updated for you</span>"
+            if L2_locked else
+            f"<span style='color:#888fa8'>Confidence building… {n_tracked}/{LOCK_THRESHOLD} hands ({det_conf*100:.0f}% confidence needed: 70%)</span>"
+        )
+
+        clf_html = (
+            f"<div style='background:rgba(0,0,0,0.3);border:1px solid {det_color}55;"
+            f"border-radius:12px;padding:0.8rem 1rem;margin-bottom:0.8rem'>"
+            f"<div style='display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem'>"
+            f"<span style='font-size:1.6rem'>{det_icon}</span>"
+            f"<div>"
+            f"<div style='color:#9ca3bc;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em'>Layer 2 · LSTM Classifier</div>"
+            f"<div style='color:{det_color};font-size:1.15rem;font-weight:700'>Reading you as: {det_label}</div>"
+            f"</div>"
+            f"<div style='margin-left:auto;font-size:0.78rem'>{status_line}</div>"
+            f"</div>"
+            f"{bars_html}"
+            f"</div>"
+        )
+        st.markdown(clf_html, unsafe_allow_html=True)
+
+        # Dramatic lock-in banner (fires once when auto_opponent first set)
+        if L2_locked and st.session_state.get("_lock_banner_shown") != auto_opponent:
+            st.session_state["_lock_banner_shown"] = auto_opponent
+            st.balloons()
+            st.success(
+                f"⚡ TiltStack identified you as **{auto_opponent}** — "
+                f"BRSolver recomputed. The dealer is now exploiting your specific tendencies."
+            )
+    else:
+        # 1–2 hands in: show a progress bar so judges see something happening
+        pct_done = n_tracked / 3
+        st.markdown(
+            f"<div style='background:rgba(0,0,0,0.25);border:1px solid #2f3548;"
+            f"border-radius:10px;padding:0.65rem 1rem;margin-bottom:0.7rem'>"
+            f"<div style='color:#9ca3bc;font-size:0.72rem;text-transform:uppercase;"
+            f"letter-spacing:0.08em;margin-bottom:6px'>Layer 2 · Building profile…</div>"
+            f"<div style='background:#1e2130;border-radius:4px;height:10px;margin-bottom:6px'>"
+            f"<div style='width:{pct_done*100:.0f}%;background:linear-gradient(90deg,#f5d46d,#d4af37);"
+            f"height:10px;border-radius:4px;transition:width 0.4s'></div></div>"
+            f"<div style='color:#888fa8;font-size:0.8rem'>"
+            f"{n_tracked} / 3 hands · Play more to unlock classification</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Metrics row ────────────────────────────────────────────────────────────
+    top_a, top_b, top_c, top_d = st.columns([2, 2, 2, 2])
     with top_a:
-        st.metric("Your Bankroll", f"{st.session_state.play_bankroll:+d} chips")
+        delta_chips = st.session_state.play_last_delta
+        st.metric("Your Bankroll",
+                  f"{st.session_state.play_bankroll:+d} chips",
+                  delta=f"{delta_chips:+d}" if st.session_state.play_hands > 0 else None)
     with top_b:
         st.metric("Hands Played", f"{st.session_state.play_hands}")
     with top_c:
-        st.caption("Classic heads-up Leduc table with clean casino styling.")
+        win_rate = (st.session_state.play_wins / st.session_state.play_hands * 100
+                    if st.session_state.play_hands > 0 else 0.0)
+        st.metric("Win Rate", f"{win_rate:.0f}%")
+    with top_d:
+        active_delta = "BRSolver exploit" if dealer_mode == "Exploit" else "Nash equilibrium"
+        if auto_opponent is not None:
+            active_delta = f"Exploiting **{auto_opponent}**"
+        st.metric("Dealer strategy", dealer_mode, delta=active_delta)
 
-    if not st.session_state.play_hand_active:
-        if st.button("Deal New Hand"):
+    # ── Persistent last showdown result ──────────────────────────────────────
+    # Shown above the deal button so judges always see the last result
+    # and know to press Deal again. Stays visible even after rerun.
+    last_sd = st.session_state.get("last_showdown")
+    if last_sd and not st.session_state.play_hand_active:
+        delta         = last_sd["delta"]
+        p_card        = CARD_LABELS[last_sd["cards"][0]]
+        d_card        = CARD_LABELS[last_sd["cards"][1]]
+        b_card        = CARD_LABELS[last_sd["cards"][2]]
+        outcome_color = "#4ecdc4" if delta > 0 else ("#ef4444" if delta < 0 else "#888fa8")
+        outcome_word  = "WIN ✓" if delta > 0 else ("LOSS ✗" if delta < 0 else "PUSH")
+        st.markdown(
+            f"<div style='background:rgba(0,0,0,0.3);border:1px solid {outcome_color}55;"
+            f"border-radius:10px;padding:0.8rem 1rem;margin-bottom:0.6rem;"
+            f"display:flex;align-items:center;justify-content:space-between'>"
+            f"<div>"
+            f"<div style='color:#9ca3bc;font-size:0.72rem;text-transform:uppercase;"
+            f"letter-spacing:0.08em'>Last hand</div>"
+            f"<div style='color:#e8eaf0;font-size:0.95rem;margin-top:2px'>"
+            f"You <strong>{p_card}</strong> · Dealer <strong>{d_card}</strong> · Board <strong>{b_card}</strong>"
+            f"</div>"
+            f"</div>"
+            f"<div style='text-align:right'>"
+            f"<div style='color:{outcome_color};font-size:1.3rem;font-weight:900'>{outcome_word}</div>"
+            f"<div style='color:{outcome_color};font-size:0.95rem'>{delta:+d} chips</div>"
+            f"</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Deal / Reset — always visible ────────────────────────────────────────
+    col_deal, col_reset = st.columns([4, 1])
+    with col_deal:
+        hand_active = st.session_state.play_hand_active
+        btn_label   = "⏳  Hand in progress…" if hand_active else "🃏  Deal New Hand"
+        if st.button(btn_label, disabled=hand_active, use_container_width=True):
             _new_table_hand(rng_table)
             st.rerun()
-    else:
-        h = st.session_state.play_h
-        cards = st.session_state.play_cards
-        round_id = _bet_round(h) + 1
-        pot_scale = 2 + 2 * _raises(h) + (4 if _bet_round(h) == 1 else 0)
+    with col_reset:
+        if st.button("↺  Reset", use_container_width=True, disabled=hand_active):
+            st.session_state.play_bankroll    = 0
+            st.session_state.play_hands       = 0
+            st.session_state.play_wins        = 0
+            st.session_state.play_last_delta  = 0
+            st.session_state.play_hand_active = False
+            st.session_state.table_rng_seed   = 0
+            st.session_state.last_showdown    = None
+            st.session_state.tracker.reset()
+            st.session_state.clf_result       = None
+            st.session_state.auto_opponent    = None
+            st.session_state.detected_br      = None
+            st.session_state.pop("_lock_banner_shown", None)
+            st.rerun()
+
+    # ── Active hand ────────────────────────────────────────────────────────────
+    if st.session_state.play_hand_active:
+        h         = st.session_state.play_h
+        cards     = st.session_state.play_cards
+        round_id  = _bet_round(h) + 1
+        pot_chips = 2 + 2 * _raises(h) + (4 if _bet_round(h) == 1 else 0)
 
         table_left, table_right = st.columns([3, 2])
         with table_left:
-            board = CARD_LABELS[cards[2]] if _bet_round(h) == 1 else "?"
+            board_card = CARD_LABELS[cards[2]] if _bet_round(h) == 1 else "—"
+            dealer_tag = (
+                f"<span style='font-size:0.7rem;color:#7c3aed;margin-left:6px'>"
+                f"🔒 exploit</span>"
+                if auto_opponent else ""
+            )
             st.markdown(
-                (
-                    "<div class='casino-table'>"
-                    "<div class='casino-title'>Main Table</div>"
-                    f"<span class='chip-pill'>Round {round_id}</span>"
-                    f"<span class='chip-pill'>Pot Pressure: {pot_scale} chips</span>"
-                    "<p><strong>Your Card:</strong><span class='card-pill'>"
-                    f"{CARD_LABELS[cards[0]]}"
-                    "</span></p>"
-                    "<p><strong>Board:</strong><span class='card-pill'>"
-                    f"{board}"
-                    "</span></p>"
-                    "<p><strong>Dealer Card:</strong><span class='card-pill'>?</span></p>"
-                    "</div>"
-                ),
+                f"<div class='casino-table'>"
+                f"<div class='casino-title'>Main Table{dealer_tag}</div>"
+                f"<span class='chip-pill'>Round {round_id} of 2</span>"
+                f"<span class='chip-pill'>Pot: {pot_chips} chips</span>"
+                f"<div style='margin-top:0.7rem;display:flex;gap:1.2rem;align-items:center'>"
+                f"<div style='text-align:center'>"
+                f"<div style='color:#9ca3bc;font-size:0.72rem;margin-bottom:3px'>YOUR CARD</div>"
+                f"<div style='background:#f7f8fb;color:#1a1d27;font-size:1.8rem;font-weight:900;"
+                f"width:2.6rem;height:2.6rem;border-radius:8px;display:flex;"
+                f"align-items:center;justify-content:center'>{CARD_LABELS[cards[0]]}</div>"
+                f"</div>"
+                f"<div style='text-align:center'>"
+                f"<div style='color:#9ca3bc;font-size:0.72rem;margin-bottom:3px'>BOARD</div>"
+                f"<div style='background:#f7f8fb;color:#1a1d27;font-size:1.8rem;font-weight:900;"
+                f"width:2.6rem;height:2.6rem;border-radius:8px;display:flex;"
+                f"align-items:center;justify-content:center'>{board_card}</div>"
+                f"</div>"
+                f"<div style='text-align:center'>"
+                f"<div style='color:#9ca3bc;font-size:0.72rem;margin-bottom:3px'>DEALER</div>"
+                f"<div style='background:#2a2d3a;color:#555d75;font-size:1.8rem;font-weight:900;"
+                f"width:2.6rem;height:2.6rem;border-radius:8px;border:1px dashed #3a3d4a;"
+                f"display:flex;align-items:center;justify-content:center'>?</div>"
+                f"</div>"
+                f"</div>"
+                f"</div>",
                 unsafe_allow_html=True,
             )
 
         with table_right:
-            st.markdown("<div class='dealer-log'>", unsafe_allow_html=True)
-            st.markdown("**Dealer Log**")
-            for entry in st.session_state.play_log[-6:]:
-                st.caption(entry)
+            st.markdown(
+                "<div class='dealer-log'>"
+                "<div style='color:#9ca3bc;font-size:0.75rem;font-weight:600;"
+                "text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px'>"
+                "Action Log</div>",
+                unsafe_allow_html=True,
+            )
+            for entry in st.session_state.play_log[-7:]:
+                icon  = "▶" if entry.startswith("You") else ("◀" if entry.startswith("Dealer") else "·")
+                color = "#e8eaf0" if entry.startswith("You") else (
+                    "#ff6b6b" if entry.startswith("Dealer") else "#555d75")
+                st.markdown(
+                    f"<div style='color:{color};font-size:0.82rem;padding:2px 0'>{icon} {entry}</div>",
+                    unsafe_allow_html=True,
+                )
             st.markdown("</div>", unsafe_allow_html=True)
 
-        # Dealer acts automatically until it's your turn or the hand ends.
+        # Dealer auto-plays until judge's turn (or hand ends)
         guard = 0
         while st.session_state.play_hand_active and _stm(st.session_state.play_h) == 1 and guard < 6:
             guard += 1
-            h_bot = st.session_state.play_h
-            if st.session_state.br_strategy is not None:
+            h_bot       = st.session_state.play_h
+            detected_br = st.session_state.get("detected_br")
+            if detected_br is not None:
+                bot_action = _br_action(detected_br, h_bot, rng_table)
+            elif st.session_state.br_strategy is not None:
                 bot_action = _br_action(st.session_state.br_strategy, h_bot, rng_table)
             else:
                 bot_action = gto_action(st.session_state.strategies, h_bot, rng_table)
             _apply_table_action(bot_action)
+            st.session_state.table_rng_seed += 1
+            rng_table = np.random.default_rng(st.session_state.table_rng_seed)
 
+        # If the dealer's action ended the hand, rerun immediately so the
+        # "Last hand" result and re-enabled Deal button render correctly.
+        # Without this, Streamlit keeps the stale "Hand in progress…" UI.
+        if not st.session_state.play_hand_active:
+            st.rerun()
+
+        # Judge's move buttons
         if st.session_state.play_hand_active and _stm(st.session_state.play_h) == 0:
-            st.markdown("**Your move**")
             h_user = st.session_state.play_h
-            legal = _legal_moves(h_user)
+            legal  = _legal_moves(h_user)
+            st.markdown(
+                "<div style='color:#f5d46d;font-weight:600;font-size:0.9rem;"
+                "margin:0.5rem 0 0.3rem'>Your move:</div>",
+                unsafe_allow_html=True,
+            )
             cols = st.columns(len(legal))
+            action_labels = {
+                Action.CHECK: ("Fold" if _raises(h_user) > 0 else "Check"),
+                Action.BET:   ("Call"  if _raises(h_user) > 0 else "Bet"),
+                Action.RAISE: "Raise",
+            }
             for idx, action in enumerate(legal):
-                if cols[idx].button(_move_label(h_user, action), key=f"user_action_{idx}_{h_user}"):
+                lbl = action_labels[action]
+                if cols[idx].button(lbl, key=f"ua_{idx}_{h_user}", use_container_width=True):
                     _apply_table_action(action)
                     st.rerun()
-
-        if not st.session_state.play_hand_active:
-            cards = st.session_state.play_cards
-            st.success(
-                f"Showdown: You `{CARD_LABELS[cards[0]]}` vs Dealer `{CARD_LABELS[cards[1]]}` "
-                f"(Board `{CARD_LABELS[cards[2]]}`) · Result {st.session_state.play_last_delta:+d} chips"
-            )

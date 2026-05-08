@@ -1,0 +1,16 @@
+# Build artifacts
+build/
+*.so
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Training data (large — download separately or copy from Downloads)
+data/hands.csv
+data/players.csv
+
+# Trained model cache (auto-regenerated from hands.csv)
+data/classifier_model.pkl
