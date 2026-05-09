@@ -153,7 +153,7 @@ matched to the training setup:
 
 | Parameter | Value | Notes |
 |-----------|:-----:|-------|
-| Starting stacks | 2000 chips (= 20 BB) | Must match `STARTING_STACK = 40,000` milli-chips in `CFRTypes.h` |
+| Starting stacks | 5000 chips (= 50 BB) | Must match `STARTING_STACK = 100,000` milli-chips in `CFRTypes.h` |
 | Blinds | 50 / 100 | Small / Big |
 | Betting | No-limit | `betting=no_limit` |
 | Players | 2 | Heads-up |
@@ -163,7 +163,7 @@ Recommended game string:
 game = pyspiel.load_game(
     "universal_poker(betting=no_limit,numPlayers=2,numSuits=4,numRanks=13,"
     "numHoleCards=2,numRounds=4,blind=50 100,raiseSize=0 0,maxRaises=0 0,"
-    "numBoardCards=0 3 1 1,stack=2000 2000)"
+    "numBoardCards=0 3 1 1,stack=5000 5000)"
 )
 ```
 
