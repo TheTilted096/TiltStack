@@ -250,8 +250,9 @@ class TurnClusterPipeline:
         self.step_assign_labels_and_ehs_fine()
         self.step_sort_by_true_ehs()
 
-        self.log("  Copying final turn artifacts back to clusters/...")
-        copy_outputs((CENTROIDS_PATH, EHS_PATH, EHS_FINE_PATH, LABELS_PATH), OUTPUT_DIR)
+        final_paths = copy_outputs(
+            (CENTROIDS_PATH, EHS_PATH, EHS_FINE_PATH, LABELS_PATH), OUTPUT_DIR
+        )
 
         self.log("  Cleaning up intermediate sample files...")
         for path in (SAMPLE_PATH, INDICES_PATH):
@@ -260,10 +261,10 @@ class TurnClusterPipeline:
                 self.log(f"  Deleted: {path}")
 
         elapsed = time.time() - start
-        self.log(f"==> Pipeline complete in {elapsed / 60:.1f} minutes")
-        self.log(f"Centroids: {CENTROIDS_PATH}")
-        self.log(f"Labels:    {LABELS_PATH}")
-        self.log(f"EHS fine:  {EHS_FINE_PATH}")
+        self.log(
+            f"==> Pipeline complete in {elapsed / 60:.1f} minutes; "
+            f"wrote {len(final_paths)} files to {OUTPUT_DIR}"
+        )
 
 
 def main():

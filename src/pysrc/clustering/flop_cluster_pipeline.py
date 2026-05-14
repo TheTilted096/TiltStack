@@ -212,14 +212,15 @@ class FlopClusterPipeline:
         centroids = self.step_train_centroids(all_cdfs)
         self.step_assign_sort_remap(all_cdfs, all_ehs, all_mult, centroids)
 
-        self.log("  Copying final flop artifacts back to clusters/...")
-        copy_outputs((CENTROIDS_PATH, EHS_PATH, EHS_FINE_PATH, LABELS_PATH), OUTPUT_DIR)
+        final_paths = copy_outputs(
+            (CENTROIDS_PATH, EHS_PATH, EHS_FINE_PATH, LABELS_PATH), OUTPUT_DIR
+        )
 
         elapsed = time.time() - start
-        self.log(f"==> Pipeline complete in {elapsed / 60:.1f} minutes")
-        self.log(f"Centroids: {CENTROIDS_PATH}")
-        self.log(f"Labels:    {LABELS_PATH}")
-        self.log(f"EHS fine:  {EHS_FINE_PATH}")
+        self.log(
+            f"==> Pipeline complete in {elapsed / 60:.1f} minutes; "
+            f"wrote {len(final_paths)} files to {OUTPUT_DIR}"
+        )
 
 
 def main():

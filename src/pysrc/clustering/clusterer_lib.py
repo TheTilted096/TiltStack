@@ -21,14 +21,17 @@ def gpu_available() -> bool:
         return False
 
 
-def copy_outputs(paths: tuple[Path, ...], output_dir: Path) -> None:
+def copy_outputs(paths: tuple[Path, ...], output_dir: Path) -> tuple[Path, ...]:
     """Copy completed temp artifacts back to the published output directory."""
     output_dir.mkdir(parents=True, exist_ok=True)
+    copied = []
     for path in paths:
         target = output_dir / path.name
         tmp_target = target.with_name(f"{target.name}.copying")
         shutil.copy2(path, tmp_target)
         tmp_target.replace(target)
+        copied.append(target)
+    return tuple(copied)
 
 
 def train_centroids(

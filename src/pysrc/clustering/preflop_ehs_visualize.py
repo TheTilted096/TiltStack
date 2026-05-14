@@ -231,7 +231,6 @@ def plot_matrix(mat, names, ehs_values, out_path):
 
     plt.tight_layout()
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
-    print(f"Matrix figure saved to {out_path}")
     plt.close(fig)
 
 
@@ -306,7 +305,6 @@ def plot_ranking(hand_info, ehs_values, out_path):
 
     plt.tight_layout()
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
-    print(f"Ranking figure saved to {out_path}")
     plt.close(fig)
 
 
@@ -339,6 +337,8 @@ def main():
     plot_ranking(hand_info, ehs, ranking_out)
     shutil.copy2(matrix_out, final_matrix_out)
     shutil.copy2(ranking_out, final_ranking_out)
+    print(f"Matrix figure saved to {final_matrix_out}")
+    print(f"Ranking figure saved to {final_ranking_out}")
 
 
 if __name__ == "__main__":

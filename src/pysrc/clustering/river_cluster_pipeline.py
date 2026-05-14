@@ -116,13 +116,34 @@ class ClusterPipeline:
         )
         self._set_thread_env()
         expander = hand_indexer.RiverExpander()
-        indices = np.fromfile(INDICES_PATH, dtype=np.uint64)
+
         t0 = time.time()
-        sample = expander.compute_sample(indices).astype(np.float32)
+        indices = np.fromfile(INDICES_PATH, dtype=np.uint64)
+        self.log(
+            f"  Loaded sample indices "
+            f"({indices.nbytes / 1e6:.1f} MB, {time.time() - t0:.1f}s)"
+        )
+
+        t0 = time.time()
+        sample_u8 = expander.compute_sample(indices)
+        self.log(
+            f"  compute_sample uint8: {sample_u8.shape[0]:,} x {sample_u8.shape[1]}  "
+            f"({sample_u8.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)"
+        )
+
+        t0 = time.time()
+        sample = sample_u8.astype(np.float32)
+        self.log(
+            f"  uint8 -> float32: "
+            f"({sample.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)"
+        )
+
+        t0 = time.time()
         np.save(SAMPLE_PATH, sample)
+        save_elapsed = time.time() - t0
         self.log(
             f"  Sample: {sample.shape[0]:,} x {sample.shape[1]}  "
-            f"({sample.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)"
+            f"({sample.nbytes / 1e9:.2f} GB, saved in {save_elapsed:.1f}s)"
         )
 
     def step_train_centroids(self):
@@ -200,8 +221,9 @@ class ClusterPipeline:
         self.step_assign_labels_and_ehs_fine()
         self.step_sort_by_true_ehs()
 
-        self.log("  Copying final river artifacts back to clusters/...")
-        copy_outputs((CENTROIDS_PATH, EHS_PATH, EHS_FINE_PATH, LABELS_PATH), OUTPUT_DIR)
+        final_paths = copy_outputs(
+            (CENTROIDS_PATH, EHS_PATH, EHS_FINE_PATH, LABELS_PATH), OUTPUT_DIR
+        )
 
         self.log("  Cleaning up intermediate sample files...")
         for path in (SAMPLE_PATH, INDICES_PATH):
@@ -210,10 +232,10 @@ class ClusterPipeline:
                 self.log(f"  Deleted: {path}")
 
         elapsed = time.time() - start
-        self.log(f"==> Pipeline complete in {elapsed / 60:.1f} minutes")
-        self.log(f"Centroids: {CENTROIDS_PATH}")
-        self.log(f"Labels:    {LABELS_PATH}")
-        self.log(f"EHS fine:  {EHS_FINE_PATH}")
+        self.log(
+            f"==> Pipeline complete in {elapsed / 60:.1f} minutes; "
+            f"wrote {len(final_paths)} files to {OUTPUT_DIR}"
+        )
 
 
 def main():

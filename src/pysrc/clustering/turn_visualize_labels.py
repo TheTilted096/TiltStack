@@ -417,7 +417,6 @@ def plot_representatives(
 
     plt.tight_layout(rect=[0, 0, 1, 0.94])
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
-    print(f"Representatives figure saved to {output_path}")
     plt.close(fig)
 
 
@@ -479,7 +478,6 @@ def plot_hands(counts, expected_ehs, output_path, hand_examples):
             y -= 0.018
 
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
-    print(f"Hands figure saved to {output_path}")
     plt.close(fig)
 
 
@@ -584,7 +582,6 @@ def main(argv=None):
     plt.tight_layout()
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
     shutil.copy2(output_path, final_output_path)
-    print(f"Overview figure saved to {output_path}")
     plt.close(fig)
 
     # ── Figure 2: PCA + rank-size with representatives ───────────────
@@ -607,6 +604,12 @@ def main(argv=None):
             shutil.copy2(hands_path, final_hands_path)
         else:
             print("Skipping example hands (TurnIndexer not available).")
+
+    print(f"Overview figure saved to {final_output_path}")
+    if has_centroids:
+        print(f"Representatives figure saved to {final_reps_path}")
+        if hand_examples is not None:
+            print(f"Hands figure saved to {final_hands_path}")
 
 
 if __name__ == "__main__":
