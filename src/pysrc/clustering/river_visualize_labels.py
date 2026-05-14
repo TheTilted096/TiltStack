@@ -8,6 +8,7 @@ diagnostic figure plus console summary statistics.
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from matplotlib.colors import LogNorm
 
 # ── Paths ─────────────────────────────────────────────────────────────
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
+TMP_OUTPUT_DIR = Path("/tmp/tiltstack-clusters")
 LABELS_PATH = OUTPUT_DIR / "river_labels.bin"
 CENTROIDS_PATH = OUTPUT_DIR / "river_centroids.npy"
 EHS_PATH = OUTPUT_DIR / "river_ehs.bin"
@@ -571,9 +573,12 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    TMP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     labels_path = os.path.abspath(LABELS_PATH)
     centroids_path = os.path.abspath(CENTROIDS_PATH)
-    output_path = os.path.abspath(OUTPUT_PATH)
+    final_output_path = os.path.abspath(OUTPUT_PATH)
+    output_path = os.path.abspath(TMP_OUTPUT_DIR / OUTPUT_PATH.name)
     k = K
     example_seed = args.seed
 
@@ -658,22 +663,28 @@ def main(argv=None):
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    shutil.copy2(output_path, final_output_path)
     print(f"Overview figure saved to {output_path}")
     plt.close(fig)
 
     # ── Figure 2: Representative clusters on PCA + rank-size ────────
     if has_centroids:
         base, ext = os.path.splitext(output_path)
+        final_base, final_ext = os.path.splitext(final_output_path)
         reps_path = base + "_representatives" + ext
+        final_reps_path = final_base + "_representatives" + final_ext
         plot_representatives(
             centroids, counts, mean_ehs, proj, var_explained, reps_path
         )
+        shutil.copy2(reps_path, final_reps_path)
 
     # ── Figure 3: Example hands ───────────────────────────────────
     if has_centroids:
         hands_path = base + "_hands" + ext
+        final_hands_path = final_base + "_hands" + final_ext
         if hand_examples is not None:
             plot_hands(counts, mean_ehs, hands_path, hand_examples)
+            shutil.copy2(hands_path, final_hands_path)
         else:
             print("hand_indexer module not found — run 'make' first to build it.")
 

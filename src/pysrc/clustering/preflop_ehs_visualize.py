@@ -13,6 +13,7 @@ Nathaniel Potter, 03-27-2026
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -24,6 +25,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
+TMP_OUTPUT_DIR = Path("/tmp/tiltstack-clusters")
 EHS_PATH = OUTPUT_DIR / "preflop_ehs_fine.bin"
 MATRIX_OUT = OUTPUT_DIR / "preflop_ehs_matrix.png"
 RANKING_OUT = OUTPUT_DIR / "preflop_ehs_ranking.png"
@@ -314,9 +316,13 @@ def plot_ranking(hand_info, ehs_values, out_path):
 
 
 def main():
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    TMP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ehs_path = os.path.abspath(EHS_PATH)
-    matrix_out = os.path.abspath(MATRIX_OUT)
-    ranking_out = os.path.abspath(RANKING_OUT)
+    matrix_out = os.path.abspath(TMP_OUTPUT_DIR / MATRIX_OUT.name)
+    ranking_out = os.path.abspath(TMP_OUTPUT_DIR / RANKING_OUT.name)
+    final_matrix_out = os.path.abspath(MATRIX_OUT)
+    final_ranking_out = os.path.abspath(RANKING_OUT)
 
     ehs = load_ehs(ehs_path)
     print(f"Loaded {len(ehs)} preflop EHS values")
@@ -331,6 +337,8 @@ def main():
     mat, cell_names = build_matrix(hand_info, ehs)
     plot_matrix(mat, cell_names, ehs, matrix_out)
     plot_ranking(hand_info, ehs, ranking_out)
+    shutil.copy2(matrix_out, final_matrix_out)
+    shutil.copy2(ranking_out, final_ranking_out)
 
 
 if __name__ == "__main__":

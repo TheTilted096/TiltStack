@@ -7,7 +7,7 @@
 #    make deepcfr        Build the deepcfr pybind11 module
 #    make all            Build both modules (default)
 #    make test           Compile and run C++ unit tests via CTest
-#    make clean          Remove build/ artifacts and pysrc/ .so files
+#    make clean          Remove tmp build artifacts and pysrc/ .so files
 #    make clean-hard     Also remove clusters/
 #
 #  Quick-start
@@ -28,14 +28,15 @@
 #    uv run python pysrc/river_cluster_pipeline.py
 # ---------------------------------------------------------------------------
 
-BUILD_DIR  = build
+BUILD_DIR ?= /tmp/tiltstack-build/src
 PYTHON_EXE := $(shell uv run python -c "import sys; print(sys.executable)")
 
 .PHONY: all hand_indexer deepcfr test clean clean-hard tidy
 
 all: hand_indexer deepcfr
 
-$(BUILD_DIR)/CMakeCache.txt:
+$(BUILD_DIR)/CMakeCache.txt: CMakeLists.txt
+	mkdir -p $(BUILD_DIR)
 	cmake -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release \
 	    -DPython_EXECUTABLE=$(PYTHON_EXE) \
 	    -DPython3_EXECUTABLE=$(PYTHON_EXE)

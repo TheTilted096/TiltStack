@@ -7,7 +7,7 @@
 #    make install    Install Python demo dependencies
 #    make test       Train CFR+ for 100k iterations
 #    make demo       Launch the Streamlit interactive demo
-#    make clean      Remove build/ artifacts and compiled .so files
+#    make clean      Remove tmp build artifacts and compiled .so files
 #
 #  Quick-start
 #  -----------
@@ -17,7 +17,7 @@
 #    make demo      # launch Streamlit UI at localhost:8501
 # ---------------------------------------------------------------------------
 
-BUILD_DIR = build
+BUILD_DIR ?= /tmp/tiltstack-build/leduc
 
 # Detect the Python interpreter: prefer uv-managed venv, fall back to
 # python3.11 or python3 for environments without a full uv sync (e.g. macOS
@@ -31,7 +31,8 @@ PYTHON_EXE := $(shell uv run python -c "import sys; print(sys.executable)" 2>/de
 build: $(BUILD_DIR)/CMakeCache.txt
 	cmake --build $(BUILD_DIR) --target leducsolver
 
-$(BUILD_DIR)/CMakeCache.txt:
+$(BUILD_DIR)/CMakeCache.txt: CMakeLists.txt
+	mkdir -p $(BUILD_DIR)
 	cmake -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release \
 	    -DPython_EXECUTABLE=$(PYTHON_EXE) \
 	    -DPython3_EXECUTABLE=$(PYTHON_EXE)
