@@ -12,6 +12,7 @@ computing (pdf @ wide_turn_ehs) / (47.0 * 46.0 * 255.0), where wide_turn_ehs
 (in [0, 46*255] scale) is derived from turn_centroids.npy and river_centroids.npy.
 """
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -29,6 +30,7 @@ CENTROIDS_PATH = OUTPUT_DIR / "flop_centroids.npy"
 EHS_PATH = OUTPUT_DIR / "flop_ehs.bin"
 OUTPUT_PATH = OUTPUT_DIR / "flop_labels_viz.png"
 K = 2048
+DEFAULT_EXAMPLE_SEED = 42
 
 
 # ── Data loading ─────────────────────────────────────────────────────
@@ -44,7 +46,7 @@ def load_label_counts(path, k, chunk=1_000_000):
 
 
 def load_counts_and_examples(
-    path, k, cluster_ids, n_examples=5, seed=None, chunk=1_000_000
+    path, k, cluster_ids, n_examples=5, seed=DEFAULT_EXAMPLE_SEED, chunk=1_000_000
 ):
     """Single-pass scan: compute per-cluster counts and collect reservoir samples."""
     rng = np.random.default_rng(seed)
@@ -451,12 +453,30 @@ def plot_hands(counts, expected_ehs, output_path, hand_examples):
 
 
 # ── Main ─────────────────────────────────────────────────────────────
-def main():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Visualize flop bucket label distribution and example hands."
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_EXAMPLE_SEED,
+        help=(
+            "Seed for choosing example hands in the hands figure "
+            f"(default: {DEFAULT_EXAMPLE_SEED})"
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
     labels_path = os.path.abspath(LABELS_PATH)
     centroids_path = os.path.abspath(CENTROIDS_PATH)
     ehs_path = os.path.abspath(EHS_PATH)
     output_path = os.path.abspath(OUTPUT_PATH)
     k = K
+    example_seed = args.seed
 
     if not os.path.isfile(labels_path):
         sys.exit(f"Error: labels file not found: {labels_path}")
@@ -490,8 +510,13 @@ def main():
     if has_centroids and indexer:
         reps = select_representatives(expected_ehs, np.ones(k, dtype=np.int64))
         print(f"Loading labels from {labels_path} (single pass: counts + examples) ...")
+        print(f"  Example hand seed: {example_seed}")
         counts, n, idx_map = load_counts_and_examples(
-            labels_path, k, reps.tolist(), n_examples=REP_N_EXAMPLES
+            labels_path,
+            k,
+            reps.tolist(),
+            n_examples=REP_N_EXAMPLES,
+            seed=example_seed,
         )
         print(f"  {n:,} labels loaded, K={k}")
 

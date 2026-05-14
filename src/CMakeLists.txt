@@ -91,6 +91,8 @@ pybind11_add_module(deepcfr
     cppsrc/deepcfr/Orchestrator.cpp
     cppsrc/deepcfr/Scheduler.cpp
     cppsrc/deepcfr/DeepCFR.cpp
+    cppsrc/deepcfr/TPO.cpp
+    cppsrc/deepcfr/Match.cpp
     cppsrc/deepcfr/CFRGame.cpp
 )
 set_target_properties(deepcfr PROPERTIES

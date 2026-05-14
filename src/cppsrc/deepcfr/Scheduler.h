@@ -7,6 +7,7 @@
 
 #include <condition_variable>
 #include <coroutine>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <vector>
@@ -36,8 +37,11 @@ class Scheduler {
     // pendingInputs / pendingOutputs are contiguous so they can be wrapped as
     // flat PyTorch tensors without copying. Each awaitable stores its index and
     // reads pendingOutputs[index] directly in await_resume() via friend access.
+    // pendingNetIdx identifies which network (0 or 1) should service the
+    // request; 0 for all training inferences, 0 or 1 for match evaluation.
     std::vector<InfoSet> pendingInputs;
     std::vector<Regrets> pendingOutputs;
+    std::vector<int> pendingNetIdx;
     std::vector<Handle> pendingHandles;
 
     // ---- Root task ownership ------------------------------------------------
@@ -68,10 +72,22 @@ class Scheduler {
 
     std::vector<InfoSet> policyInputs;
     std::vector<Strategy> policyOutputs;
-    std::vector<int> policyWeights;
+    std::vector<float> policyWeights;
 
     int completedRollouts = 0;
     int rolloutCount() const { return completedRollouts; }
+
+    // Per-pair payoffs written by Match::gamePair (cleared by start_match
+    // setup).
+    std::vector<float> sbPayoffs;
+    std::vector<float> bbPayoffs;
+
+    // TPO paired-write sync: when true, adv and pol reservoir inserts in
+    // flushBatch are wrapped in a single lock so both reservoirs advance their
+    // nSeen counters atomically, preserving per-sample correspondence across
+    // threads.
+    bool syncSample = false;
+    std::shared_ptr<std::mutex> sampleMutex;
 
     // ---- C++ interface ------------------------------------------------------
 
@@ -86,7 +102,7 @@ class Scheduler {
     // many slots opened up for new spawns.
     int purgeCompleted();
 
-    std::size_t enqueueInference(InfoSet input, Handle handle);
+    std::size_t enqueueInference(InfoSet input, Handle handle, int netIdx = 0);
 
     // ---- Python interface ---------------------------------------------------
 
@@ -96,6 +112,7 @@ class Scheduler {
     // Raw pointers for zero-copy numpy / torch tensor construction (inference).
     InfoSet *inputData() { return pendingInputs.data(); }
     Regrets *outputData() { return pendingOutputs.data(); }
+    int *netIdxData() { return pendingNetIdx.data(); }
     int batchSize() { return static_cast<int>(pendingHandles.size()); }
 
     // Number of root tasks currently alive (spawned but not yet purged).
@@ -108,10 +125,29 @@ class Scheduler {
 
     InfoSet *policyInputData() { return policyInputs.data(); }
     Strategy *policyOutputData() { return policyOutputs.data(); }
-    int *policyWeightData() { return policyWeights.data(); }
+    float *policyWeightData() { return policyWeights.data(); }
     int policySize() { return static_cast<int>(policyInputs.size()); }
 
     // Reset all replay buffers. Called by the worker at the start of each
     // iteration so Python can safely harvest data between iterations.
     void clearBuffers();
+};
+
+// ---------------------------------------------------------------------------
+// InferenceAwaitable
+// Suspends the calling coroutine, registers an inference request with the
+// scheduler, and resumes once the scheduler has filled in the result.
+// ---------------------------------------------------------------------------
+
+struct InferenceAwaitable {
+    InfoSet input;
+    Scheduler &sched;
+    int netIdx = 0; // which network to query (0 for training; 0 or 1 for match)
+    std::size_t index = 0;
+
+    bool await_ready() noexcept { return false; }
+    void await_suspend(Handle handle) noexcept {
+        index = sched.enqueueInference(input, handle, netIdx);
+    }
+    Regrets await_resume() noexcept { return sched.pendingOutputs[index]; }
 };

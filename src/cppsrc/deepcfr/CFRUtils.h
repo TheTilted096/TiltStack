@@ -76,3 +76,85 @@ inline void readU16File(const std::string &path, std::vector<uint16_t> &out) {
 // Also initialises g_indexer, so all callers get a ready-to-use indexer
 // without needing a separate init step.
 void loadTables(const std::string &clusters_dir);
+
+// ---------------------------------------------------------------------------
+// Card dealing — partial Fisher-Yates over a 52-card deck using the
+// thread-local RNG.  Writes 9 unique card indices into out[0..8].
+// ---------------------------------------------------------------------------
+
+inline void dealCards(std::array<Card, 9> &out) {
+    Card deck[52];
+    for (int i = 0; i < 52; i++)
+        deck[i] = static_cast<Card>(i);
+    for (int i = 0; i < 9; i++) {
+        int j =
+            i + static_cast<int>(rng.next() % static_cast<uint64_t>(52 - i));
+        std::swap(deck[i], deck[j]);
+        out[i] = deck[i];
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Legal-action strategy helpers
+// ---------------------------------------------------------------------------
+
+// Select the legal action with the highest value in logits.
+inline Action argmaxLegal(const Regrets &logits, const ActionList &moves,
+                          int numMoves) {
+    Action best = moves[0];
+    float bestVal = logits[static_cast<int>(moves[0])];
+    for (int i = 1; i < numMoves; i++) {
+        float v = logits[static_cast<int>(moves[i])];
+        if (v > bestVal) {
+            bestVal = v;
+            best = moves[i];
+        }
+    }
+    return best;
+}
+
+// Renormalize softmax probability mass to the legal action subset.
+// Falls back to uniform if all legal probabilities are zero.
+inline Strategy normalizeLegal(const Regrets &probs, const ActionList &moves,
+                               int numMoves) {
+    float sum = 0.0f;
+    for (int i = 0; i < numMoves; i++)
+        sum += probs[static_cast<int>(moves[i])];
+    Strategy s{};
+    if (sum > 1e-8f) {
+        for (int i = 0; i < numMoves; i++) {
+            int a = static_cast<int>(moves[i]);
+            s[a] = probs[a] / sum;
+        }
+    } else {
+        float u = 1.0f / static_cast<float>(numMoves);
+        for (int i = 0; i < numMoves; i++)
+            s[static_cast<int>(moves[i])] = u;
+    }
+    return s;
+}
+
+// Set illegal action slots to NaN so Python loss masking can detect them via
+// isnan().  Call after normalizeLegal() to combine normalization and masking.
+inline void nanMaskIllegal(Strategy &s, const ActionList &moves, int numMoves) {
+    Strategy masked;
+    masked.fill(std::numeric_limits<float>::quiet_NaN());
+    for (int i = 0; i < numMoves; i++) {
+        int a = static_cast<int>(moves[i]);
+        masked[a] = s[a];
+    }
+    s = masked;
+}
+
+// Sample an action from a strategy distribution using the thread-local RNG.
+inline Action sampleAction(const Strategy &strat, const ActionList &moves,
+                           int numMoves) {
+    float sample = rng.nextFloat();
+    float cumulative = 0.0f;
+    for (int i = 0; i < numMoves; i++) {
+        cumulative += strat[static_cast<int>(moves[i])];
+        if (sample < cumulative)
+            return moves[i];
+    }
+    return moves[numMoves - 1];
+}

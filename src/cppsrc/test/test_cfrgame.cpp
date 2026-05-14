@@ -3,9 +3,9 @@
 
 static constexpr uint64_t TEST_SEED = 42ULL;
 
-// Resize gEHS[r] / gLabels[r] to accommodate the canonical indices that
-// begin() will access when the RNG is seeded with TEST_SEED.  Values are
-// left at zero — EHS and bucket fields are irrelevant to these tests.
+// Resize gLabels[r] to accommodate the canonical indices that begin() will
+// access when the RNG is seeded with TEST_SEED.  Values are left at zero;
+// bucket fields are irrelevant to these tests.
 static void primeGlobals() {
     static bool done = false;
     if (done)
@@ -31,8 +31,6 @@ static void primeGlobals() {
         hand_index_all(&g_indexer, cards, indices);
         for (int r = 0; r < 4; r++) {
             auto i = static_cast<std::size_t>(indices[r]);
-            if (i >= gEHS[r].size())
-                gEHS[r].resize(i + 1, 0);
             if (i >= gLabels[r].size())
                 gLabels[r].resize(i + 1, 0);
         }

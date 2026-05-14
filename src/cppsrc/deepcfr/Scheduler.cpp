@@ -39,10 +39,12 @@ void Scheduler::clearBuffers() {
     completedRollouts = 0;
 }
 
-std::size_t Scheduler::enqueueInference(InfoSet input, Handle handle) {
+std::size_t Scheduler::enqueueInference(InfoSet input, Handle handle,
+                                        int netIdx) {
     std::size_t index = pendingHandles.size();
     pendingInputs.push_back(input);
     pendingHandles.push_back(handle);
+    pendingNetIdx.push_back(netIdx);
     return index;
 }
 
@@ -61,11 +63,20 @@ void Scheduler::flushBatch() {
     // While Python is running GPU inference, write accumulated data to the
     // global reservoirs. This overlaps reservoir writes with GPU computation,
     // eliminating the serial post-iteration collection phase entirely.
-    if (advReservoir)
-        advReservoir->insert(threadId, advantageInputs, advantageOutputs);
-    if (polReservoir)
-        polReservoir->insert(threadId, policyInputs, policyOutputs,
-                             &policyWeights);
+    if (syncSample && sampleMutex) {
+        std::lock_guard<std::mutex> lk(*sampleMutex);
+        if (advReservoir)
+            advReservoir->insert(threadId, advantageInputs, advantageOutputs);
+        if (polReservoir)
+            polReservoir->insert(threadId, policyInputs, policyOutputs,
+                                 &policyWeights);
+    } else {
+        if (advReservoir)
+            advReservoir->insert(threadId, advantageInputs, advantageOutputs);
+        if (polReservoir)
+            polReservoir->insert(threadId, policyInputs, policyOutputs,
+                                 &policyWeights);
+    }
 
     advantageInputs.clear();
     advantageOutputs.clear();
@@ -84,6 +95,7 @@ void Scheduler::flushBatch() {
         ready.push(h);
 
     pendingInputs.clear();
+    pendingNetIdx.clear();
     pendingHandles.clear();
 }
 

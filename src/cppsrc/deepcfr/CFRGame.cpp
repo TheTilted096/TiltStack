@@ -70,19 +70,9 @@ void CFRGame::indexCards(const Card deck[9]) {
 
 void CFRGame::begin(int ss1, int ss2, bool h) {
     initState(ss1, ss2, h);
-
-    // Partial Fisher-Yates: pick 9 unique cards from the 52-card deck.
-    Card deck[CARDS];
-    for (int i = 0; i < CARDS; i++) {
-        deck[i] = static_cast<Card>(i);
-    }
-    for (int i = 0; i < 9; i++) {
-        int j =
-            i + static_cast<int>(rng.next() % static_cast<uint64_t>(CARDS - i));
-        std::swap(deck[i], deck[j]);
-    }
-
-    indexCards(deck);
+    std::array<Card, 9> cards;
+    dealCards(cards);
+    indexCards(cards.data());
 }
 
 void CFRGame::beginWithCards(int ss1, int ss2, bool h, const Card cards[9]) {

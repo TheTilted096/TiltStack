@@ -3,21 +3,10 @@
 
 namespace DeepCFR {
 
-Action sampleAction(const Strategy &strat, const ActionList &moves,
-                    int numMoves) {
-    float sample = rng.nextFloat();
-    float cumulative = 0.0f;
-    for (int i = 0; i < numMoves; i++) {
-        cumulative += strat[static_cast<int>(moves[i])];
-        if (sample < cumulative)
-            return moves[i];
-    }
-    return moves[numMoves - 1];
-}
-
-Strategy getInstantStrat(const Regrets &r, const ActionList &moves,
-                         int numMoves) {
-    Strategy s{};
+static Strategy getInstantStrat(const Regrets &r, const ActionList &moves,
+                                int numMoves) {
+    Strategy s;
+    s.fill(std::numeric_limits<float>::quiet_NaN());
     float sum = 0.0f;
 
     for (int i = 0; i < numMoves; i++) {
