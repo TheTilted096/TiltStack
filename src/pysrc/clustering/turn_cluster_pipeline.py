@@ -61,7 +61,7 @@ from clusterer_lib import (
 # ---------------------------------------------------------------------------
 
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
-TMP_OUTPUT_DIR = Path("/tmp/tiltstack-clusters")
+TMP_OUTPUT_DIR = Path("/tmp") / "tiltstack-clusters"
 RIVER_LABELS_PATH = OUTPUT_DIR / "river_labels.bin"
 RIVER_EHS_FINE_PATH = OUTPUT_DIR / "river_ehs_fine.bin"
 INDICES_PATH = TMP_OUTPUT_DIR / "turn_sample_indices.bin"
@@ -76,6 +76,22 @@ CLUSTER_EHS_PATH = TMP_OUTPUT_DIR / "turn_cluster_ehs_accum.npy"  # temp
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
+
+
+def set_tmp_output_dir(tmpdir: Path):
+    """Set temp output paths from the user-provided temp root."""
+    global TMP_OUTPUT_DIR
+    global INDICES_PATH, SAMPLE_PATH, CENTROIDS_PATH, EHS_PATH
+    global EHS_FINE_PATH, LABELS_PATH, CLUSTER_EHS_PATH
+
+    TMP_OUTPUT_DIR = Path(tmpdir) / "tiltstack-clusters"
+    INDICES_PATH = TMP_OUTPUT_DIR / "turn_sample_indices.bin"
+    SAMPLE_PATH = TMP_OUTPUT_DIR / "turn_sample.npy"
+    CENTROIDS_PATH = TMP_OUTPUT_DIR / "turn_centroids.npy"
+    EHS_PATH = TMP_OUTPUT_DIR / "turn_ehs.bin"
+    EHS_FINE_PATH = TMP_OUTPUT_DIR / "turn_ehs_fine.bin"
+    LABELS_PATH = TMP_OUTPUT_DIR / "turn_labels.bin"
+    CLUSTER_EHS_PATH = TMP_OUTPUT_DIR / "turn_cluster_ehs_accum.npy"
 
 
 class TurnClusterPipeline:
@@ -200,9 +216,7 @@ class TurnClusterPipeline:
             batch_size=3_000_000,
             metric=METRIC_L1,
             label="turn",
-            vector_transform=lambda hist: np.cumsum(
-                hist.astype(np.float32), axis=1
-            ),
+            vector_transform=lambda hist: np.cumsum(hist.astype(np.float32), axis=1),
         )
         np.save(CLUSTER_EHS_PATH, per_cluster_ehs)
         self.log(f"  Labels saved: {LABELS_PATH}")
@@ -303,8 +317,15 @@ Examples:
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="Suppress status messages"
     )
+    parser.add_argument(
+        "--tmpdir",
+        type=Path,
+        default=Path("/tmp"),
+        help="Temporary directory root (default: /tmp)",
+    )
 
     args = parser.parse_args()
+    set_tmp_output_dir(args.tmpdir)
 
     TurnClusterPipeline(
         k=args.clusters,

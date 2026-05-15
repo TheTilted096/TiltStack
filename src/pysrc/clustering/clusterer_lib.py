@@ -108,9 +108,7 @@ def weighted_cluster_ehs(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return weighted EHS and multiplicity sums for one labeled batch."""
     mult = multiplicity.astype(np.float64)
-    ehs_sum = np.bincount(
-        labels, weights=ehs.astype(np.float64) * mult, minlength=k
-    )
+    ehs_sum = np.bincount(labels, weights=ehs.astype(np.float64) * mult, minlength=k)
     mult_sum = np.bincount(labels, weights=mult, minlength=k)
     return ehs_sum, mult_sum
 

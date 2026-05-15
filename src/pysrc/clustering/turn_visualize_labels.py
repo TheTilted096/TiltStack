@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 
 # ── Paths ─────────────────────────────────────────────────────────────
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
-TMP_OUTPUT_DIR = Path("/tmp/tiltstack-clusters")
+TMP_OUTPUT_DIR = Path("/tmp") / "tiltstack-clusters"
 LABELS_PATH = OUTPUT_DIR / "turn_labels.bin"
 CENTROIDS_PATH = OUTPUT_DIR / "turn_centroids.npy"
 EHS_PATH = OUTPUT_DIR / "turn_ehs.bin"
@@ -495,18 +495,25 @@ def parse_args(argv=None):
             f"(default: {DEFAULT_EXAMPLE_SEED})"
         ),
     )
+    parser.add_argument(
+        "--tmpdir",
+        type=Path,
+        default=Path("/tmp"),
+        help="Temporary directory root (default: /tmp)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
+    tmp_output_dir = Path(args.tmpdir) / "tiltstack-clusters"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    TMP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_output_dir.mkdir(parents=True, exist_ok=True)
     labels_path = os.path.abspath(LABELS_PATH)
     centroids_path = os.path.abspath(CENTROIDS_PATH)
     ehs_path = os.path.abspath(EHS_PATH)
     final_output_path = os.path.abspath(OUTPUT_PATH)
-    output_path = os.path.abspath(TMP_OUTPUT_DIR / OUTPUT_PATH.name)
+    output_path = os.path.abspath(tmp_output_dir / OUTPUT_PATH.name)
     k = K
     example_seed = args.seed
 

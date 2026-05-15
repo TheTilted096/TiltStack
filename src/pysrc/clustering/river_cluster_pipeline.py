@@ -48,7 +48,7 @@ from clusterer_lib import (
 # ---------------------------------------------------------------------------
 
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
-TMP_OUTPUT_DIR = Path("/tmp/tiltstack-clusters")
+TMP_OUTPUT_DIR = Path("/tmp") / "tiltstack-clusters"
 INDICES_PATH = TMP_OUTPUT_DIR / "river_sample_indices.bin"
 SAMPLE_PATH = TMP_OUTPUT_DIR / "river_sample.npy"
 CENTROIDS_PATH = TMP_OUTPUT_DIR / "river_centroids.npy"
@@ -58,6 +58,22 @@ LABELS_PATH = TMP_OUTPUT_DIR / "river_labels.bin"
 CLUSTER_EHS_PATH = TMP_OUTPUT_DIR / "river_cluster_ehs_accum.npy"  # temp
 
 NUM_RIVER_STATES = 2_428_287_420
+
+
+def set_tmp_output_dir(tmpdir: Path):
+    """Set temp output paths from the user-provided temp root."""
+    global TMP_OUTPUT_DIR
+    global INDICES_PATH, SAMPLE_PATH, CENTROIDS_PATH, EHS_PATH
+    global EHS_FINE_PATH, LABELS_PATH, CLUSTER_EHS_PATH
+
+    TMP_OUTPUT_DIR = Path(tmpdir) / "tiltstack-clusters"
+    INDICES_PATH = TMP_OUTPUT_DIR / "river_sample_indices.bin"
+    SAMPLE_PATH = TMP_OUTPUT_DIR / "river_sample.npy"
+    CENTROIDS_PATH = TMP_OUTPUT_DIR / "river_centroids.npy"
+    EHS_PATH = TMP_OUTPUT_DIR / "river_ehs.bin"
+    EHS_FINE_PATH = TMP_OUTPUT_DIR / "river_ehs_fine.bin"
+    LABELS_PATH = TMP_OUTPUT_DIR / "river_labels.bin"
+    CLUSTER_EHS_PATH = TMP_OUTPUT_DIR / "river_cluster_ehs_accum.npy"
 
 
 class ClusterPipeline:
@@ -116,34 +132,13 @@ class ClusterPipeline:
         )
         self._set_thread_env()
         expander = hand_indexer.RiverExpander()
-
-        t0 = time.time()
         indices = np.fromfile(INDICES_PATH, dtype=np.uint64)
-        self.log(
-            f"  Loaded sample indices "
-            f"({indices.nbytes / 1e6:.1f} MB, {time.time() - t0:.1f}s)"
-        )
-
         t0 = time.time()
-        sample_u8 = expander.compute_sample(indices)
-        self.log(
-            f"  compute_sample uint8: {sample_u8.shape[0]:,} x {sample_u8.shape[1]}  "
-            f"({sample_u8.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)"
-        )
-
-        t0 = time.time()
-        sample = sample_u8.astype(np.float32)
-        self.log(
-            f"  uint8 -> float32: "
-            f"({sample.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)"
-        )
-
-        t0 = time.time()
+        sample = expander.compute_sample(indices).astype(np.float32)
         np.save(SAMPLE_PATH, sample)
-        save_elapsed = time.time() - t0
         self.log(
             f"  Sample: {sample.shape[0]:,} x {sample.shape[1]}  "
-            f"({sample.nbytes / 1e9:.2f} GB, saved in {save_elapsed:.1f}s)"
+            f"({sample.nbytes / 1e9:.2f} GB, {time.time() - t0:.1f}s)"
         )
 
     def step_train_centroids(self):
@@ -274,8 +269,15 @@ Examples:
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="Suppress status messages"
     )
+    parser.add_argument(
+        "--tmpdir",
+        type=Path,
+        default=Path("/tmp"),
+        help="Temporary directory root (default: /tmp)",
+    )
 
     args = parser.parse_args()
+    set_tmp_output_dir(args.tmpdir)
 
     ClusterPipeline(
         k=args.clusters,

@@ -15,6 +15,7 @@ Nathaniel Potter, 03-27-2026
 import os
 import shutil
 import sys
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +26,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
-TMP_OUTPUT_DIR = Path("/tmp/tiltstack-clusters")
+TMP_OUTPUT_DIR = Path("/tmp") / "tiltstack-clusters"
 EHS_PATH = OUTPUT_DIR / "preflop_ehs_fine.bin"
 MATRIX_OUT = OUTPUT_DIR / "preflop_ehs_matrix.png"
 RANKING_OUT = OUTPUT_DIR / "preflop_ehs_ranking.png"
@@ -314,11 +315,21 @@ def plot_ranking(hand_info, ehs_values, out_path):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Visualize preflop EHS fine values.")
+    parser.add_argument(
+        "--tmpdir",
+        type=Path,
+        default=Path("/tmp"),
+        help="Temporary directory root (default: /tmp)",
+    )
+    args = parser.parse_args()
+
+    tmp_output_dir = Path(args.tmpdir) / "tiltstack-clusters"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    TMP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_output_dir.mkdir(parents=True, exist_ok=True)
     ehs_path = os.path.abspath(EHS_PATH)
-    matrix_out = os.path.abspath(TMP_OUTPUT_DIR / MATRIX_OUT.name)
-    ranking_out = os.path.abspath(TMP_OUTPUT_DIR / RANKING_OUT.name)
+    matrix_out = os.path.abspath(tmp_output_dir / MATRIX_OUT.name)
+    ranking_out = os.path.abspath(tmp_output_dir / RANKING_OUT.name)
     final_matrix_out = os.path.abspath(MATRIX_OUT)
     final_ranking_out = os.path.abspath(RANKING_OUT)
 
