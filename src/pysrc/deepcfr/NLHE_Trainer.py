@@ -27,24 +27,19 @@ Player convention
   hero=True   →  player 1  →  big blind    →  acts when isButton=False
 """
 
-import math
 import os
 import sys
 import time
 import threading
 import argparse
 from pathlib import Path
-import numpy as np
 import torch
-import torch.nn.functional as F
 from tb_launch import launch_tb, stop_tb
 
 import deepcfr
 from network_training import (
     DeepCFRNet,
     Reservoir,
-    run_inference_loop,
-    decode_batch_gpu,
     verify_layout,
     CONT_DIM,
     NUM_STREETS,
@@ -53,232 +48,12 @@ from network_training import (
     _rate,
     _eta,
 )
+from rollout import run_player_rollout
+from train_loops import cosine_lr, policy_trainer, train_advantage
+from training_control import TrainingControl, run_menu
 
 
 RESERVOIR_CAPACITY = 100_000_000
-SHUFFLE_BLOCK_SIZE = 1_048_576
-
-
-# ---------------------------------------------------------------------------
-# Training
-# ---------------------------------------------------------------------------
-
-
-def _shuffled_minibatches(N: int, batch_size: int):
-    block_size = max(batch_size, min(SHUFFLE_BLOCK_SIZE, N))
-    n_blocks = math.ceil(N / block_size)
-    for block in torch.randperm(n_blocks):
-        start = int(block) * block_size
-        end = min(start + block_size, N)
-        perm = torch.randperm(end - start).add_(start)
-        for pos in range(0, end - start, batch_size):
-            yield perm[pos : pos + batch_size]
-
-
-def train_advantage(
-    net: DeepCFRNet,
-    optimizer: torch.optim.Optimizer,
-    raw_inputs: np.ndarray,
-    targets: np.ndarray,
-    batch_size: int = 4096,
-    steps: int = 2500,
-    device: torch.device = torch.device("cuda"),
-) -> list[float]:
-    N = len(raw_inputs)
-    if N == 0:
-        raise ValueError("train_advantage requires at least one sample")
-    if steps <= 0:
-        raise ValueError("steps must be positive")
-
-    raw_pt = torch.from_numpy(raw_inputs)
-    tgt_pt = torch.from_numpy(targets)
-
-    raw_buf = torch.empty(
-        batch_size, raw_inputs.shape[1], dtype=torch.uint8, pin_memory=True
-    )
-    tgt_buf = torch.empty(
-        batch_size, targets.shape[1], dtype=torch.float32, pin_memory=True
-    )
-
-    net.train()
-
-    def _step(idx):
-        bs = len(idx)
-        raw_buf[:bs].copy_(raw_pt[idx])
-        tgt_buf[:bs].copy_(tgt_pt[idx])
-        raw_b = raw_buf[:bs].to(device, non_blocking=True)
-        t_b = tgt_buf[:bs].to(device, non_blocking=True)
-        optimizer.zero_grad(set_to_none=True)
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            xc, b = decode_batch_gpu(raw_b)
-            mask = ~torch.isnan(t_b)
-            sq_err = ((net(xc, b) - t_b.nan_to_num(0.0)) * mask) ** 2
-            loss = sq_err.sum(dim=1).div(mask.sum(dim=1).clamp(min=1)).mean()
-        loss.backward()
-        optimizer.step()
-        return loss.detach()
-
-    total = torch.zeros(1, device=device)
-    steps_done = 0
-    while steps_done < steps:
-        for idx in _shuffled_minibatches(N, batch_size):
-            total += _step(idx)
-            steps_done += 1
-            if steps_done >= steps:
-                break
-
-    return [(total / steps).item()]
-
-
-def policy_trainer(
-    net: DeepCFRNet,
-    optimizer: torch.optim.Optimizer,
-    raw_inputs: np.ndarray,
-    targets: np.ndarray,
-    weights: np.ndarray,
-    batch_size: int = 4096,
-    device: torch.device = torch.device("cuda"),
-):
-    N = len(raw_inputs)
-    raw_pt = torch.from_numpy(raw_inputs)
-    tgt_pt = torch.from_numpy(targets)
-    wt_pt = torch.from_numpy(np.asarray(weights, dtype=np.float32))
-
-    raw_buf = torch.empty(
-        batch_size, raw_inputs.shape[1], dtype=torch.uint8, pin_memory=True
-    )
-    tgt_buf = torch.empty(
-        batch_size, targets.shape[1], dtype=torch.float32, pin_memory=True
-    )
-    wt_buf = torch.empty(batch_size, dtype=torch.float32, pin_memory=True)
-
-    net.train()
-    ep = 0
-    while True:
-        ep += 1
-        ep_t0 = time.perf_counter()
-        total = torch.zeros(1, device=device)
-        n_batches = 0
-        for idx in _shuffled_minibatches(N, batch_size):
-            bs = len(idx)
-            raw_buf[:bs].copy_(raw_pt[idx])
-            tgt_buf[:bs].copy_(tgt_pt[idx])
-            wt_buf[:bs].copy_(wt_pt[idx])
-            raw_b = raw_buf[:bs].to(device, non_blocking=True)
-            t_b = tgt_buf[:bs].to(device, non_blocking=True)
-            wt_b = wt_buf[:bs].to(device, non_blocking=True)
-            optimizer.zero_grad(set_to_none=True)
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                xc, b = decode_batch_gpu(raw_b)
-                wt_b = wt_b / wt_b.mean()
-                legal = ~torch.isnan(t_b)
-                log_probs = F.log_softmax(
-                    net(xc, b).masked_fill(~legal, float("-inf")), dim=1
-                )
-                # Illegal slots have target 0 and log_prob -inf; mask log_probs
-                # before multiplying to avoid IEEE 0 * -inf -> NaN.
-                per_sample = -(
-                    t_b.nan_to_num(0.0) * log_probs.masked_fill(~legal, 0.0)
-                ).sum(dim=1)
-                loss = (wt_b * per_sample).mean()
-            loss.backward()
-            optimizer.step()
-            total += loss.detach()
-            n_batches += 1
-        yield ep, (total / n_batches).item(), time.perf_counter() - ep_t0
-
-
-# ---------------------------------------------------------------------------
-# LR schedule
-# ---------------------------------------------------------------------------
-
-
-def _cosine_lr(ep: int, base_ep: int, base_lr: float, total_ep: int) -> float:
-    """LR for epoch `ep` in a cosine segment that starts at `base_ep` with
-    `base_lr` and decays to 0 at `total_ep`."""
-    remaining = total_ep - base_ep
-    if remaining <= 0:
-        return 0.0
-    return 0.5 * base_lr * (1.0 + math.cos(math.pi * (ep - base_ep) / remaining))
-
-
-# ---------------------------------------------------------------------------
-# Training control
-# ---------------------------------------------------------------------------
-
-
-class TrainingControl:
-    """Shared state between the training loop and the menu thread."""
-
-    def __init__(self, total_iters: int, total_epochs: int) -> None:
-        self._lock = threading.Lock()
-        self.stop_after_iter = total_iters
-        self.policy_epochs = total_epochs
-        self.current_iter = 0
-        self.current_epoch = 0
-        self.phase = "advantage"  # "advantage" | "policy" | "done"
-
-
-def _run_menu(ctrl: TrainingControl, term) -> None:
-    """Daemon thread: display prompts on the terminal and apply user commands."""
-    while True:
-        with ctrl._lock:
-            if ctrl.phase == "done":
-                return
-            if ctrl.phase == "advantage":
-                cur = ctrl.current_iter
-                stop = ctrl.stop_after_iter
-                prompt = f"\nenter number of adv iters ({stop}) > "
-            else:
-                cur_ep = ctrl.current_epoch
-                epochs = ctrl.policy_epochs
-                prompt = f"\nenter number of policy epochs ({epochs}) > "
-
-        term.write(prompt)
-        term.flush()
-
-        try:
-            line = sys.stdin.readline()
-        except OSError:
-            return
-
-        if not line:  # EOF
-            return
-
-        line = line.strip()
-        if not line:
-            continue
-
-        try:
-            val = int(line)
-        except ValueError:
-            term.write("  ! not a number\n")
-            term.flush()
-            continue
-
-        with ctrl._lock:
-            if ctrl.phase == "advantage":
-                cur = ctrl.current_iter
-                if val <= cur:
-                    term.write(f"  ! {val} <= current iter {cur}\n")
-                else:
-                    ctrl.stop_after_iter = val
-                    term.write(f"  -> adv iters set to {val}\n")
-                    print(f"[{_ts()}]  [ctrl] adv iters set to {val}", flush=True)
-            elif ctrl.phase == "policy":
-                cur_ep = ctrl.current_epoch
-                if val <= cur_ep:
-                    term.write(f"  ! {val} <= current epoch {cur_ep}\n")
-                else:
-                    ctrl.policy_epochs = val
-                    term.write(f"  -> policy epochs set to {val}\n")
-                    print(f"[{_ts()}]  [ctrl] policy epochs set to {val}", flush=True)
-        term.flush()
-
-
-# ---------------------------------------------------------------------------
-# Checkpointing
-# ---------------------------------------------------------------------------
 
 
 def save_final_policy(ckpt_dir, t, strat_net):
@@ -373,7 +148,7 @@ def main():
 
     # ---- Training control + menu thread -------------------------------------
     ctrl = TrainingControl(args.iters, args.epochs)
-    menu = threading.Thread(target=_run_menu, args=(ctrl, _term), daemon=True)
+    menu = threading.Thread(target=run_menu, args=(ctrl, _term), daemon=True)
     menu.start()
 
     # ---- One-time setup -----------------------------------------------------
@@ -430,45 +205,35 @@ def main():
             player = int(hero)
 
             # -- Rollout --------------------------------------------------
-            adv_before = adv_res[player].n_seen
             collect_policy = t > 50
-            pol_before = strat_res.n_seen if collect_policy else 0
 
-            t0 = time.perf_counter()
-            orch.start_deepcfr_iteration(
-                hero,
-                t,
-                args.samples,
-                adv_res[0]._cpp,
-                adv_res[1]._cpp,
-                pol_res=strat_res._cpp if collect_policy else None,
+            rollout = run_player_rollout(
+                orch=orch,
+                device=device,
+                adv_nets=adv_nets,
+                adv_res=adv_res,
+                strat_res=strat_res,
+                hero=hero,
+                iteration=t,
+                samples=args.samples,
+                collect_policy=collect_policy,
             )
-            run_inference_loop(orch, device, adv_nets)
-            orch.wait_iteration()
-            rollout_secs = time.perf_counter() - t0
 
-            rollouts = sum(s.rollout_count() for s in orch.schedulers)
-            orch.clear_buffers()
-
-            adv_new = adv_res[player].n_seen - adv_before
-            adv_size = adv_res[player].size
             cap_str = _fmt(RESERVOIR_CAPACITY)
 
             print(
-                f"\n  [P{player} rollout]  {rollout_secs:.1f}s"
-                f"  ·  rollouts={_fmt(rollouts)}"
-                f"  ·  {_rate(adv_new, rollout_secs)} infosets/s"
+                f"\n  [P{player} rollout]  {rollout.seconds:.1f}s"
+                f"  ·  rollouts={_fmt(rollout.rollouts)}"
+                f"  ·  {_rate(rollout.adv_new, rollout.seconds)} infosets/s"
             )
             print(
-                f"    advantage  +{_fmt(adv_new):<12}"
-                f"  reservoir  {_fmt(adv_size):>12} / {cap_str}"
+                f"    advantage  +{_fmt(rollout.adv_new):<12}"
+                f"  reservoir  {_fmt(rollout.adv_size):>12} / {cap_str}"
             )
             if collect_policy:
-                pol_new = strat_res.n_seen - pol_before
-                pol_size = strat_res.size
                 print(
-                    f"    policy     +{_fmt(pol_new):<12}"
-                    f"  reservoir  {_fmt(pol_size):>12} / {cap_str}"
+                    f"    policy     +{_fmt(rollout.pol_new):<12}"
+                    f"  reservoir  {_fmt(rollout.pol_size):>12} / {cap_str}"
                 )
 
             # -- Advantage training ---------------------------------------
@@ -582,7 +347,7 @@ def main():
         if ep >= n_epochs:
             break
 
-        next_lr = _cosine_lr(ep + 1, sched_base_ep, sched_base_lr, n_epochs)
+        next_lr = cosine_lr(ep + 1, sched_base_ep, sched_base_lr, n_epochs)
         for pg in strat_opt.param_groups:
             pg["lr"] = next_lr
 
