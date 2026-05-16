@@ -106,13 +106,26 @@ void Orchestrator::runWorker(int threadIdx) {
         }
 
         // Flush any training data accumulated after the last flushBatch().
-        if (sched.advReservoir)
-            sched.advReservoir->insert(threadIdx, sched.advantageInputs,
-                                       sched.advantageOutputs);
-        if (sched.polReservoir)
-            sched.polReservoir->insert(threadIdx, sched.policyInputs,
-                                       sched.policyOutputs,
-                                       &sched.policyWeights);
+        // TPO needs advantage/policy rows to remain aligned across reservoirs,
+        // so use the same paired-insert lock as Scheduler::flushBatch().
+        if (sched.syncSample && sched.sampleMutex) {
+            std::lock_guard<std::mutex> lk(*sched.sampleMutex);
+            if (sched.advReservoir)
+                sched.advReservoir->insert(threadIdx, sched.advantageInputs,
+                                           sched.advantageOutputs);
+            if (sched.polReservoir)
+                sched.polReservoir->insert(threadIdx, sched.policyInputs,
+                                           sched.policyOutputs,
+                                           &sched.policyWeights);
+        } else {
+            if (sched.advReservoir)
+                sched.advReservoir->insert(threadIdx, sched.advantageInputs,
+                                           sched.advantageOutputs);
+            if (sched.polReservoir)
+                sched.polReservoir->insert(threadIdx, sched.policyInputs,
+                                           sched.policyOutputs,
+                                           &sched.policyWeights);
+        }
 
         {
             std::unique_lock lock(mtx_);

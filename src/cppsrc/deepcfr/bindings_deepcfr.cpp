@@ -287,11 +287,12 @@ PYBIND11_MODULE(deepcfr, m) {
         // workers.  Collects both advantage and policy samples.  Non-blocking.
         .def(
             "start_tpo_iteration",
-            [](Orchestrator &o, bool hero, int totalSamples, Reservoir &advRes0,
-               Reservoir &advRes1, Reservoir &polRes) {
-                Reservoir *advRes = hero ? &advRes1 : &advRes0;
+            [](Orchestrator &o, bool hero, int totalSamples, Reservoir &advRes,
+               Reservoir &polRes) {
+                Reservoir *advResPtr = &advRes;
+                Reservoir *polResPtr = &polRes;
                 std::size_t nAtStart =
-                    advRes->nSeen.load(std::memory_order_relaxed);
+                    advResPtr->nSeen.load(std::memory_order_relaxed);
                 auto sharedMutex = std::make_shared<std::mutex>();
 
                 o.startIteration(
@@ -300,20 +301,21 @@ PYBIND11_MODULE(deepcfr, m) {
                         g.begin(STARTING_STACK, STARTING_STACK, hero);
                         return TPO::rollout(std::move(g), hero, sched);
                     },
-                    [advRes, nAtStart, totalSamples]() -> bool {
-                        return advRes->nSeen.load(std::memory_order_relaxed) -
+                    [advResPtr, nAtStart, totalSamples]() -> bool {
+                        return advResPtr->nSeen.load(
+                                   std::memory_order_relaxed) -
                                    nAtStart >=
                                static_cast<std::size_t>(totalSamples);
                     },
-                    [advRes, &polRes, sharedMutex](Scheduler &sched) {
-                        sched.advReservoir = advRes;
-                        sched.polReservoir = &polRes;
+                    [advResPtr, polResPtr, sharedMutex](Scheduler &sched) {
+                        sched.advReservoir = advResPtr;
+                        sched.polReservoir = polResPtr;
                         sched.syncSample = true;
                         sched.sampleMutex = sharedMutex;
                     });
             },
             py::arg("hero"), py::arg("total_samples") = 10'000'000,
-            py::arg("adv_res0"), py::arg("adv_res1"), py::arg("pol_res"))
+            py::arg("adv_res"), py::arg("pol_res"))
 
         // -- Match iteration --------------------------------------------------
         // Builds a Match::gamePair factory and pair-count stop predicate.

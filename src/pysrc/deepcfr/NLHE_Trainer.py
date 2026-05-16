@@ -33,7 +33,6 @@ import sys
 import time
 import threading
 import argparse
-import subprocess
 from pathlib import Path
 import numpy as np
 import torch
@@ -47,8 +46,6 @@ from network_training import (
     run_inference_loop,
     decode_batch_gpu,
     verify_layout,
-    infoset_dtype,
-    NUM_ACTIONS,
     CONT_DIM,
     NUM_STREETS,
     _ts,
@@ -59,11 +56,23 @@ from network_training import (
 
 
 RESERVOIR_CAPACITY = 100_000_000
+SHUFFLE_BLOCK_SIZE = 1_048_576
 
 
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
+
+
+def _shuffled_minibatches(N: int, batch_size: int):
+    block_size = max(batch_size, min(SHUFFLE_BLOCK_SIZE, N))
+    n_blocks = math.ceil(N / block_size)
+    for block in torch.randperm(n_blocks):
+        start = int(block) * block_size
+        end = min(start + block_size, N)
+        perm = torch.randperm(end - start).add_(start)
+        for pos in range(0, end - start, batch_size):
+            yield perm[pos : pos + batch_size]
 
 
 def train_advantage(
@@ -72,11 +81,15 @@ def train_advantage(
     raw_inputs: np.ndarray,
     targets: np.ndarray,
     batch_size: int = 4096,
-    epochs: int = 1,
-    max_steps: int | None = None,
+    steps: int = 2500,
     device: torch.device = torch.device("cuda"),
 ) -> list[float]:
     N = len(raw_inputs)
+    if N == 0:
+        raise ValueError("train_advantage requires at least one sample")
+    if steps <= 0:
+        raise ValueError("steps must be positive")
+
     raw_pt = torch.from_numpy(raw_inputs)
     tgt_pt = torch.from_numpy(targets)
 
@@ -95,7 +108,7 @@ def train_advantage(
         tgt_buf[:bs].copy_(tgt_pt[idx])
         raw_b = raw_buf[:bs].to(device, non_blocking=True)
         t_b = tgt_buf[:bs].to(device, non_blocking=True)
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             xc, b = decode_batch_gpu(raw_b)
             mask = ~torch.isnan(t_b)
@@ -105,33 +118,16 @@ def train_advantage(
         optimizer.step()
         return loss.detach()
 
-    if max_steps is not None:
-        total = torch.zeros(1, device=device)
-        steps_done = 0
-        perm = torch.randperm(N)
-        pos = 0
-        while steps_done < max_steps:
-            if pos >= N:
-                perm = torch.randperm(N)
-                pos = 0
-            idx = perm[pos : pos + batch_size]
-            pos += batch_size
+    total = torch.zeros(1, device=device)
+    steps_done = 0
+    while steps_done < steps:
+        for idx in _shuffled_minibatches(N, batch_size):
             total += _step(idx)
             steps_done += 1
-        return [(total / steps_done).item()]
+            if steps_done >= steps:
+                break
 
-    losses = []
-    for _ in range(epochs):
-        perm = torch.randperm(N)
-        total = torch.zeros(1, device=device)
-        n_batches = 0
-        for start in range(0, N, batch_size):
-            idx = perm[start : start + batch_size]
-            total += _step(idx)
-            n_batches += 1
-        losses.append((total / n_batches).item())
-
-    return losses
+    return [(total / steps).item()]
 
 
 def policy_trainer(
@@ -146,7 +142,7 @@ def policy_trainer(
     N = len(raw_inputs)
     raw_pt = torch.from_numpy(raw_inputs)
     tgt_pt = torch.from_numpy(targets)
-    wt_pt = torch.from_numpy(weights.astype(np.float32))
+    wt_pt = torch.from_numpy(np.asarray(weights, dtype=np.float32))
 
     raw_buf = torch.empty(
         batch_size, raw_inputs.shape[1], dtype=torch.uint8, pin_memory=True
@@ -161,11 +157,9 @@ def policy_trainer(
     while True:
         ep += 1
         ep_t0 = time.perf_counter()
-        perm = torch.randperm(N)
         total = torch.zeros(1, device=device)
         n_batches = 0
-        for start in range(0, N, batch_size):
-            idx = perm[start : start + batch_size]
+        for idx in _shuffled_minibatches(N, batch_size):
             bs = len(idx)
             raw_buf[:bs].copy_(raw_pt[idx])
             tgt_buf[:bs].copy_(tgt_pt[idx])
@@ -173,7 +167,7 @@ def policy_trainer(
             raw_b = raw_buf[:bs].to(device, non_blocking=True)
             t_b = tgt_buf[:bs].to(device, non_blocking=True)
             wt_b = wt_buf[:bs].to(device, non_blocking=True)
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 xc, b = decode_batch_gpu(raw_b)
                 wt_b = wt_b / wt_b.mean()
@@ -338,9 +332,8 @@ def main():
     root = Path(__file__).parent.parent.parent
     ckpt_dir = root / "checkpoints"
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if device.type == "cuda":
-        torch.set_float32_matmul_precision("high")
+    device = torch.device("cuda")
+    torch.set_float32_matmul_precision("high")
 
     # ---- Log file setup -----------------------------------------------------
     run_name = time.strftime("%m%d%y_%H%M%S")
@@ -496,11 +489,11 @@ def main():
                     adv_res[player].inputs[:n_adv],
                     adv_res[player].targets[:n_adv],
                     batch_size=args.batch,
-                    max_steps=args.adv_step,
+                    steps=args.adv_step,
                     device=device,
                 )
                 train_secs = time.perf_counter() - t0
-                samples_seen = args.adv_step * args.batch
+                samples_seen = args.adv_step * min(args.batch, n_adv)
                 writer.add_scalar(f"adv/p{player}", losses[-1], global_step=t)
                 print(
                     f"\n  [P{player} advantage]  samples={_fmt(n_adv)}"

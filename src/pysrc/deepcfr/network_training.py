@@ -331,14 +331,27 @@ class Reservoir:
         self._cpp.reset()
 
 
+_SHIFT_CACHE: dict[tuple[str, torch.dtype, int], torch.Tensor] = {}
+
+
+def _shifts(device: torch.device, dtype: torch.dtype, n: int) -> torch.Tensor:
+    key = (str(device), dtype, n)
+    shifts = _SHIFT_CACHE.get(key)
+    if shifts is None:
+        shifts = torch.arange(n, device=device, dtype=dtype)
+        _SHIFT_CACHE[key] = shifts
+    return shifts
+
+
 def decode_batch_gpu(raw_gpu: torch.Tensor):
     """Decodes a raw (N, 168) uint8 tensor natively on the GPU."""
     N = raw_gpu.shape[0]
 
     # 1. Cards (Bytes 0-31): 4x 64-bit ints
     cards_i64 = raw_gpu.view(torch.int64)[:, 0:4]
-    shifts = torch.arange(52, device=raw_gpu.device, dtype=torch.int64)
-    bits = ((cards_i64.unsqueeze(-1) >> shifts) & 1).float()
+    bits = (
+        (cards_i64.unsqueeze(-1) >> _shifts(raw_gpu.device, torch.int64, 52)) & 1
+    ).float()
     bits = bits.view(N, 208)
 
     # 2. Floats (Bytes 32-143): 28x 32-bit floats (4 scalars + betHist[4][6])
@@ -346,8 +359,9 @@ def decode_batch_gpu(raw_gpu: torch.Tensor):
 
     # 3. betHistMask (Bytes 144-147): uint32 → unpack 24 LSBs → (N, 24) float
     mask_i32 = raw_gpu.view(torch.int32)[:, 36]  # (N,)
-    shifts = torch.arange(24, device=raw_gpu.device, dtype=torch.int32)
-    mask_bits = ((mask_i32.unsqueeze(1) >> shifts) & 1).float()  # (N, 24)
+    mask_bits = (
+        (mask_i32.unsqueeze(1) >> _shifts(raw_gpu.device, torch.int32, 24)) & 1
+    ).float()  # (N, 24)
 
     # 4. Bools (Bytes 154-158): streetEmbed[4] + isButton[1]
     bools = raw_gpu[:, 154:159].float()
@@ -376,6 +390,9 @@ def run_inference_loop(orch, device, nets, *, softmax: bool = False, hero=None):
            bool  -> split by is_button == hero (hero -> nets[0], villain -> nets[1])
     """
     done = 0
+    raw_pinned = torch.empty(
+        (0, deepcfr.INFOSET_BYTES), dtype=torch.uint8, pin_memory=True
+    )
     while done < orch.num_threads():
         first = orch.pop()
         rest = orch.drain()
@@ -391,20 +408,32 @@ def run_inference_loop(orch, device, nets, *, softmax: bool = False, hero=None):
             continue
 
         sizes = [s.batch_size() for s in scheds]
-        raws = [np.array(s.input_data(), copy=False) for s in scheds]
-        raw_cat = np.concatenate(raws, axis=0) if len(raws) > 1 else raws[0]
+        total_size = sum(sizes)
+        if raw_pinned.shape[0] < total_size:
+            raw_pinned = torch.empty(
+                (total_size, deepcfr.INFOSET_BYTES),
+                dtype=torch.uint8,
+                pin_memory=True,
+            )
 
-        x_cont, buckets = decode_batch_gpu(
-            torch.from_numpy(raw_cat).to(device, non_blocking=True)
-        )
+        raw_host = raw_pinned[:total_size]
+        offset = 0
+        for s, sz in zip(scheds, sizes):
+            raw_host[offset : offset + sz].copy_(
+                torch.from_numpy(np.array(s.input_data(), copy=False))
+            )
+            offset += sz
 
-        struct = raw_cat.ravel().view(infoset_dtype)
+        x_cont, buckets = decode_batch_gpu(raw_host.to(device, non_blocking=True))
+
+        raw_np = raw_host.numpy()
+        struct = raw_np.ravel().view(infoset_dtype)
         is_button = struct["is_button"]
         mask_b = (is_button == hero) if hero is not None else ~is_button
         idx_a = np.where(~mask_b)[0]
         idx_b = np.where(mask_b)[0]
 
-        out = np.empty((raw_cat.shape[0], NUM_ACTIONS), dtype=np.float32)
+        out = np.empty((total_size, NUM_ACTIONS), dtype=np.float32)
 
         with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             for idx, net in ((idx_a, nets[0]), (idx_b, nets[1])):

@@ -15,7 +15,6 @@ import os
 import sys
 import time
 import argparse
-import subprocess
 from pathlib import Path
 import numpy as np
 import torch
@@ -29,8 +28,6 @@ from network_training import (
     decode_batch_gpu,
     verify_layout,
     NUM_ACTIONS,
-    CONT_DIM,
-    NUM_STREETS,
     _ts,
     _fmt,
     _rate,
@@ -95,7 +92,7 @@ def train_tpo_policy(
             adv_b = adv_pinned[start : start + batch_size].to(device, non_blocking=True)
             pol_b = pol_pinned[start : start + batch_size].to(device, non_blocking=True)
             wgt_b = wgt_pinned[start : start + batch_size].to(device, non_blocking=True)
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 xc, b = decode_batch_gpu(raw_b)
                 logits = net(xc, b)
@@ -249,9 +246,8 @@ def main():
         stop_tb(tb_proc)
         os._exit(code)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if device.type == "cuda":
-        torch.set_float32_matmul_precision("high")
+    device = torch.device("cuda")
+    torch.set_float32_matmul_precision("high")
 
     seed = 0xDEADBEEFCAFE1234 if args.seed is None else args.seed
 
@@ -297,7 +293,6 @@ def main():
             orch.start_tpo_iteration(
                 hero,
                 samples_per_seat,
-                adv_res._cpp,
                 adv_res._cpp,
                 pol_res._cpp,
             )
