@@ -13,7 +13,9 @@ Nathaniel Potter, 03-27-2026
 """
 
 import os
+import shutil
 import sys
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +26,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
+TMP_OUTPUT_DIR = Path("/tmp") / "tiltstack-clusters"
 EHS_PATH = OUTPUT_DIR / "preflop_ehs_fine.bin"
 MATRIX_OUT = OUTPUT_DIR / "preflop_ehs_matrix.png"
 RANKING_OUT = OUTPUT_DIR / "preflop_ehs_ranking.png"
@@ -229,7 +232,6 @@ def plot_matrix(mat, names, ehs_values, out_path):
 
     plt.tight_layout()
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
-    print(f"Matrix figure saved to {out_path}")
     plt.close(fig)
 
 
@@ -304,7 +306,6 @@ def plot_ranking(hand_info, ehs_values, out_path):
 
     plt.tight_layout()
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
-    print(f"Ranking figure saved to {out_path}")
     plt.close(fig)
 
 
@@ -314,9 +315,23 @@ def plot_ranking(hand_info, ehs_values, out_path):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Visualize preflop EHS fine values.")
+    parser.add_argument(
+        "--tmpdir",
+        type=Path,
+        default=Path("/tmp"),
+        help="Temporary directory root (default: /tmp)",
+    )
+    args = parser.parse_args()
+
+    tmp_output_dir = Path(args.tmpdir) / "tiltstack-clusters"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_output_dir.mkdir(parents=True, exist_ok=True)
     ehs_path = os.path.abspath(EHS_PATH)
-    matrix_out = os.path.abspath(MATRIX_OUT)
-    ranking_out = os.path.abspath(RANKING_OUT)
+    matrix_out = os.path.abspath(tmp_output_dir / MATRIX_OUT.name)
+    ranking_out = os.path.abspath(tmp_output_dir / RANKING_OUT.name)
+    final_matrix_out = os.path.abspath(MATRIX_OUT)
+    final_ranking_out = os.path.abspath(RANKING_OUT)
 
     ehs = load_ehs(ehs_path)
     print(f"Loaded {len(ehs)} preflop EHS values")
@@ -331,6 +346,10 @@ def main():
     mat, cell_names = build_matrix(hand_info, ehs)
     plot_matrix(mat, cell_names, ehs, matrix_out)
     plot_ranking(hand_info, ehs, ranking_out)
+    shutil.copy2(matrix_out, final_matrix_out)
+    shutil.copy2(ranking_out, final_ranking_out)
+    print(f"Matrix figure saved to {final_matrix_out}")
+    print(f"Ranking figure saved to {final_ranking_out}")
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ Nathaniel Potter, 03-15-2026
 """
 
 import argparse
+import shutil
 import sys
 import time
 from itertools import combinations
@@ -39,11 +40,20 @@ import hand_indexer
 # ---------------------------------------------------------------------------
 
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
+TMP_OUTPUT_DIR = Path("/tmp") / "tiltstack-clusters"
 FLOP_EHS_FINE_PATH = OUTPUT_DIR / "flop_ehs_fine.bin"
-PREFLOP_EHS_PATH = OUTPUT_DIR / "preflop_ehs_fine.bin"
+PREFLOP_EHS_PATH = TMP_OUTPUT_DIR / "preflop_ehs_fine.bin"
 
 NUM_CARDS = 52
 NUM_PREFLOP = 169
+
+
+def set_tmp_output_dir(tmpdir: Path):
+    """Set temp output paths from the user-provided temp root."""
+    global TMP_OUTPUT_DIR, PREFLOP_EHS_PATH
+
+    TMP_OUTPUT_DIR = Path(tmpdir) / "tiltstack-clusters"
+    PREFLOP_EHS_PATH = TMP_OUTPUT_DIR / "preflop_ehs_fine.bin"
 
 
 def compute_preflop_ehs(verbose: bool = True) -> np.ndarray:
@@ -120,7 +130,14 @@ def main():
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="Suppress status messages"
     )
+    parser.add_argument(
+        "--tmpdir",
+        type=Path,
+        default=Path("/tmp"),
+        help="Temporary directory root (default: /tmp)",
+    )
     args = parser.parse_args()
+    set_tmp_output_dir(args.tmpdir)
 
     verbose = not args.quiet
 
@@ -130,23 +147,17 @@ def main():
             "Run the flop clustering pipeline first."
         )
 
-    if PREFLOP_EHS_PATH.exists():
-        if verbose:
-            print(
-                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
-                f"{PREFLOP_EHS_PATH} already exists, skipping.",
-                file=sys.stderr,
-            )
-        return
-
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    TMP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ehs = compute_preflop_ehs(verbose=verbose)
     np.rint(ehs * 65535.0).astype(np.uint16).tofile(PREFLOP_EHS_PATH)
+    final_path = OUTPUT_DIR / PREFLOP_EHS_PATH.name
+    shutil.copy2(PREFLOP_EHS_PATH, final_path)
 
     if verbose:
         print(
             f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
-            f"Saved {len(ehs)} preflop EHS values to {PREFLOP_EHS_PATH}",
+            f"Saved {len(ehs)} preflop EHS values to {final_path}",
             file=sys.stderr,
         )
 

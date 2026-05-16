@@ -47,11 +47,13 @@ from pathlib import Path
 import numpy as np
 
 import hand_indexer
-from turn_clusterer import (
-    assign_turn_labels_and_ehs_fine_streaming,
+from clusterer_lib import (
+    METRIC_L1,
+    assign_labels_and_ehs_fine_streaming,
+    copy_outputs,
     gpu_available,
     remap_labels_inplace,
-    train_turn_centroids,
+    train_centroids,
 )
 
 # ---------------------------------------------------------------------------
@@ -59,20 +61,37 @@ from turn_clusterer import (
 # ---------------------------------------------------------------------------
 
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
+TMP_OUTPUT_DIR = Path("/tmp") / "tiltstack-clusters"
 RIVER_LABELS_PATH = OUTPUT_DIR / "river_labels.bin"
 RIVER_EHS_FINE_PATH = OUTPUT_DIR / "river_ehs_fine.bin"
-INDICES_PATH = OUTPUT_DIR / "turn_sample_indices.bin"
-SAMPLE_PATH = OUTPUT_DIR / "turn_sample.npy"
-CENTROIDS_PATH = OUTPUT_DIR / "turn_centroids.npy"
-EHS_PATH = OUTPUT_DIR / "turn_ehs.bin"
-EHS_FINE_PATH = OUTPUT_DIR / "turn_ehs_fine.bin"
-LABELS_PATH = OUTPUT_DIR / "turn_labels.bin"
-CLUSTER_EHS_PATH = OUTPUT_DIR / "turn_cluster_ehs_accum.npy"  # temp
+INDICES_PATH = TMP_OUTPUT_DIR / "turn_sample_indices.bin"
+SAMPLE_PATH = TMP_OUTPUT_DIR / "turn_sample.npy"
+CENTROIDS_PATH = TMP_OUTPUT_DIR / "turn_centroids.npy"
+EHS_PATH = TMP_OUTPUT_DIR / "turn_ehs.bin"
+EHS_FINE_PATH = TMP_OUTPUT_DIR / "turn_ehs_fine.bin"
+LABELS_PATH = TMP_OUTPUT_DIR / "turn_labels.bin"
+CLUSTER_EHS_PATH = TMP_OUTPUT_DIR / "turn_cluster_ehs_accum.npy"  # temp
 
 
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
+
+
+def set_tmp_output_dir(tmpdir: Path):
+    """Set temp output paths from the user-provided temp root."""
+    global TMP_OUTPUT_DIR
+    global INDICES_PATH, SAMPLE_PATH, CENTROIDS_PATH, EHS_PATH
+    global EHS_FINE_PATH, LABELS_PATH, CLUSTER_EHS_PATH
+
+    TMP_OUTPUT_DIR = Path(tmpdir) / "tiltstack-clusters"
+    INDICES_PATH = TMP_OUTPUT_DIR / "turn_sample_indices.bin"
+    SAMPLE_PATH = TMP_OUTPUT_DIR / "turn_sample.npy"
+    CENTROIDS_PATH = TMP_OUTPUT_DIR / "turn_centroids.npy"
+    EHS_PATH = TMP_OUTPUT_DIR / "turn_ehs.bin"
+    EHS_FINE_PATH = TMP_OUTPUT_DIR / "turn_ehs_fine.bin"
+    LABELS_PATH = TMP_OUTPUT_DIR / "turn_labels.bin"
+    CLUSTER_EHS_PATH = TMP_OUTPUT_DIR / "turn_cluster_ehs_accum.npy"
 
 
 class TurnClusterPipeline:
@@ -94,6 +113,7 @@ class TurnClusterPipeline:
         self.threads = threads
         self.verbose = verbose
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        TMP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
         for path, name in [
             (RIVER_LABELS_PATH, "river_labels.bin"),
@@ -128,10 +148,6 @@ class TurnClusterPipeline:
 
     def step_generate_indices(self):
         """Generate sorted random sample indices and save to disk."""
-        if INDICES_PATH.exists():
-            self.log("Indices already exist, skipping generation.")
-            return
-
         self.log(f"==> Step 1/5: Sampling {self.sample_size:,} indices...")
         t0 = time.time()
         expander = self._make_expander()
@@ -151,10 +167,6 @@ class TurnClusterPipeline:
 
     def step_compute_sample(self):
         """Compute wide-bucket CDF vectors for the sampled indices."""
-        if SAMPLE_PATH.exists():
-            self.log("Sample already exists, skipping computation.")
-            return
-
         self.log(
             f"==> Step 2/5: Computing CDF vectors for {self.sample_size:,} samples..."
         )
@@ -172,41 +184,39 @@ class TurnClusterPipeline:
 
     def step_train_centroids(self):
         """Train K-means centroids (L1) on the saved sample (unsorted)."""
-        if CENTROIDS_PATH.exists():
-            self.log("Centroids already exist, skipping training.")
-            return
-
         self.log(
             f"==> Step 3/5: Training K={self.k:,} centroids "
             f"({self.niter} iterations, L1)..."
         )
         sample = np.load(SAMPLE_PATH)
-        centroids = train_turn_centroids(sample, self.k, self.niter, self.seed)
+        centroids = train_centroids(
+            sample,
+            self.k,
+            self.niter,
+            self.seed,
+            metric=METRIC_L1,
+            label="turn centroids",
+        )
         np.save(CENTROIDS_PATH, centroids)
         self.log(f"  Centroids saved: {CENTROIDS_PATH}")
 
     def step_assign_labels_and_ehs_fine(self):
         """Stream all turn states in a single pass: assign labels and compute EHS fine."""
-        if (
-            LABELS_PATH.exists()
-            and EHS_FINE_PATH.exists()
-            and CLUSTER_EHS_PATH.exists()
-        ):
-            self.log("Labels and EHS fine already exist, skipping.")
-            return
-
         self.log(
             "==> Step 4/5: Assigning labels and computing EHS fine (single pass)..."
         )
         self._set_thread_env()
         expander = self._make_expander()
         centroids = np.load(CENTROIDS_PATH)
-        per_cluster_ehs = assign_turn_labels_and_ehs_fine_streaming(
+        per_cluster_ehs = assign_labels_and_ehs_fine_streaming(
             expander,
             centroids,
             str(LABELS_PATH),
             str(EHS_FINE_PATH),
             batch_size=3_000_000,
+            metric=METRIC_L1,
+            label="turn",
+            vector_transform=lambda hist: np.cumsum(hist.astype(np.float32), axis=1),
         )
         np.save(CLUSTER_EHS_PATH, per_cluster_ehs)
         self.log(f"  Labels saved: {LABELS_PATH}")
@@ -218,10 +228,6 @@ class TurnClusterPipeline:
 
     def step_sort_by_true_ehs(self):
         """Sort centroids by weighted per-cluster EHS; remap labels; write turn_ehs.bin."""
-        if EHS_PATH.exists():
-            self.log("EHS file already exists, skipping sort step.")
-            return
-
         self.log("==> Step 5/5: Sorting by true EHS and remapping labels...")
         centroids = np.load(CENTROIDS_PATH)
         per_cluster_ehs = np.load(CLUSTER_EHS_PATH)
@@ -258,6 +264,10 @@ class TurnClusterPipeline:
         self.step_assign_labels_and_ehs_fine()
         self.step_sort_by_true_ehs()
 
+        final_paths = copy_outputs(
+            (CENTROIDS_PATH, EHS_PATH, EHS_FINE_PATH, LABELS_PATH), OUTPUT_DIR
+        )
+
         self.log("  Cleaning up intermediate sample files...")
         for path in (SAMPLE_PATH, INDICES_PATH):
             if path.exists():
@@ -265,10 +275,10 @@ class TurnClusterPipeline:
                 self.log(f"  Deleted: {path}")
 
         elapsed = time.time() - start
-        self.log(f"==> Pipeline complete in {elapsed / 60:.1f} minutes")
-        self.log(f"Centroids: {CENTROIDS_PATH}")
-        self.log(f"Labels:    {LABELS_PATH}")
-        self.log(f"EHS fine:  {EHS_FINE_PATH}")
+        self.log(
+            f"==> Pipeline complete in {elapsed / 60:.1f} minutes; "
+            f"wrote {len(final_paths)} files to {OUTPUT_DIR}"
+        )
 
 
 def main():
@@ -307,8 +317,15 @@ Examples:
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="Suppress status messages"
     )
+    parser.add_argument(
+        "--tmpdir",
+        type=Path,
+        default=Path("/tmp"),
+        help="Temporary directory root (default: /tmp)",
+    )
 
     args = parser.parse_args()
+    set_tmp_output_dir(args.tmpdir)
 
     TurnClusterPipeline(
         k=args.clusters,

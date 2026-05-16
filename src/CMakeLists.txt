@@ -8,6 +8,10 @@ find_package(Python 3.11 REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(OpenMP REQUIRED)
 find_package(Threads REQUIRED)
 
+# Tell pybind11 to use CMake's find_package(Python) result instead of its
+# legacy FindPythonInterp/FindPythonLibs path.
+set(PYBIND11_FINDPYTHON ON)
+
 include(FetchContent)
 
 FetchContent_Declare(pybind11
@@ -43,6 +47,22 @@ if(NOT ompeval_POPULATED)
     FetchContent_Populate(OMPEval)
 endif()
 
+set(PYBIND_STAGING_DIR "${CMAKE_CURRENT_BINARY_DIR}/tmp/pybind")
+
+function(stage_pybind_module target output_dir)
+    set_target_properties(${target} PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${PYBIND_STAGING_DIR}/${target}"
+    )
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${output_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:${target}>"
+                "${output_dir}/$<TARGET_FILE_NAME:${target}>"
+        COMMENT "Copying ${target} module to ${output_dir}"
+        VERBATIM
+    )
+endfunction()
+
 # ---------------------------------------------------------------------------
 # Shared C/C++ libraries from vendored sources
 # ---------------------------------------------------------------------------
@@ -75,8 +95,8 @@ pybind11_add_module(hand_indexer
 set_target_properties(hand_indexer PROPERTIES
     CXX_STANDARD 11
     CXX_STANDARD_REQUIRED ON
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/pysrc/clustering"
 )
+stage_pybind_module(hand_indexer "${CMAKE_CURRENT_SOURCE_DIR}/pysrc/clustering")
 target_compile_options(hand_indexer PRIVATE -O3)
 target_link_libraries(hand_indexer PRIVATE hand_iso ompeval OpenMP::OpenMP_CXX)
 target_include_directories(hand_indexer PRIVATE cppsrc/clustering)
@@ -98,8 +118,8 @@ pybind11_add_module(deepcfr
 set_target_properties(deepcfr PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/pysrc/deepcfr"
 )
+stage_pybind_module(deepcfr "${CMAKE_CURRENT_SOURCE_DIR}/pysrc/deepcfr")
 target_compile_options(deepcfr PRIVATE -O3)
 target_link_libraries(deepcfr PRIVATE hand_iso ompeval Threads::Threads)
 target_include_directories(deepcfr PRIVATE cppsrc/deepcfr)

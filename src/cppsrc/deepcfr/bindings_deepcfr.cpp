@@ -110,11 +110,11 @@ PYBIND11_MODULE(deepcfr, m) {
         .def_property_readonly(
             "current_round",
             [](const CFRGame &g) { return static_cast<int>(g.currentRound); })
-        .def_property_readonly("stacks",
-                               [](const CFRGame &g) {
-                                   return std::vector<int>{g.stacks[0],
-                                                           g.stacks[1]};
-                               })
+        .def_property_readonly(
+            "stacks",
+            [](const CFRGame &g) {
+                return std::vector<int>{g.stacks[0], g.stacks[1]};
+            })
         .def_property_readonly(
             "is_terminal", [](const CFRGame &g) { return g.isTerminal != 0; });
 

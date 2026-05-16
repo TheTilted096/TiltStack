@@ -14,6 +14,7 @@ derived from river_centroids.npy.
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -25,6 +26,7 @@ import matplotlib.pyplot as plt
 
 # ── Paths ─────────────────────────────────────────────────────────────
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "clusters"
+TMP_OUTPUT_DIR = Path("/tmp") / "tiltstack-clusters"
 LABELS_PATH = OUTPUT_DIR / "turn_labels.bin"
 CENTROIDS_PATH = OUTPUT_DIR / "turn_centroids.npy"
 EHS_PATH = OUTPUT_DIR / "turn_ehs.bin"
@@ -415,7 +417,6 @@ def plot_representatives(
 
     plt.tight_layout(rect=[0, 0, 1, 0.94])
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
-    print(f"Representatives figure saved to {output_path}")
     plt.close(fig)
 
 
@@ -477,7 +478,6 @@ def plot_hands(counts, expected_ehs, output_path, hand_examples):
             y -= 0.018
 
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
-    print(f"Hands figure saved to {output_path}")
     plt.close(fig)
 
 
@@ -495,15 +495,25 @@ def parse_args(argv=None):
             f"(default: {DEFAULT_EXAMPLE_SEED})"
         ),
     )
+    parser.add_argument(
+        "--tmpdir",
+        type=Path,
+        default=Path("/tmp"),
+        help="Temporary directory root (default: /tmp)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
+    tmp_output_dir = Path(args.tmpdir) / "tiltstack-clusters"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_output_dir.mkdir(parents=True, exist_ok=True)
     labels_path = os.path.abspath(LABELS_PATH)
     centroids_path = os.path.abspath(CENTROIDS_PATH)
     ehs_path = os.path.abspath(EHS_PATH)
-    output_path = os.path.abspath(OUTPUT_PATH)
+    final_output_path = os.path.abspath(OUTPUT_PATH)
+    output_path = os.path.abspath(tmp_output_dir / OUTPUT_PATH.name)
     k = K
     example_seed = args.seed
 
@@ -578,24 +588,35 @@ def main(argv=None):
     plot_cluster_sizes(axes, counts, n)
     plt.tight_layout()
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
-    print(f"Overview figure saved to {output_path}")
+    shutil.copy2(output_path, final_output_path)
     plt.close(fig)
 
     # ── Figure 2: PCA + rank-size with representatives ───────────────
     if has_centroids:
         base, ext = os.path.splitext(output_path)
+        final_base, final_ext = os.path.splitext(final_output_path)
         reps_path = base + "_representatives" + ext
+        final_reps_path = final_base + "_representatives" + final_ext
         plot_representatives(
             centroids, counts, expected_ehs, proj, var_explained, reps_path
         )
+        shutil.copy2(reps_path, final_reps_path)
 
     # ── Figure 3: Example hands ───────────────────────────────────────
     if has_centroids:
         hands_path = base + "_hands" + ext
+        final_hands_path = final_base + "_hands" + final_ext
         if hand_examples is not None:
             plot_hands(counts, expected_ehs, hands_path, hand_examples)
+            shutil.copy2(hands_path, final_hands_path)
         else:
             print("Skipping example hands (TurnIndexer not available).")
+
+    print(f"Overview figure saved to {final_output_path}")
+    if has_centroids:
+        print(f"Representatives figure saved to {final_reps_path}")
+        if hand_examples is not None:
+            print(f"Hands figure saved to {final_hands_path}")
 
 
 if __name__ == "__main__":

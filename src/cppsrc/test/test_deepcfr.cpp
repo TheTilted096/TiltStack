@@ -14,8 +14,8 @@ static ActionList makeActions(std::initializer_list<Action> acts) {
 
 // ---------------------------------------------------------------------------
 
-// Zero legal probability mass gives uniform probability over legal actions only.
-// Actions outside the legal list must remain at zero.
+// Zero legal probability mass gives uniform probability over legal actions
+// only. Actions outside the legal list must remain at zero.
 TEST(DeepCFR, NormalizeLegalFallback) {
     Regrets r{};
     ActionList al = makeActions({Action::CHECK, Action::CALL, Action::BET50});

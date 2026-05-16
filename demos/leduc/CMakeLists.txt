@@ -17,11 +17,21 @@ FetchContent_Declare(pybind11
 )
 FetchContent_MakeAvailable(pybind11)
 
+set(PYBIND_STAGING_DIR "${CMAKE_CURRENT_BINARY_DIR}/tmp/pybind")
+
 pybind11_add_module(leducsolver src/cppsrc/bindings.cpp)
 set_target_properties(leducsolver PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/pysrc"
+    LIBRARY_OUTPUT_DIRECTORY "${PYBIND_STAGING_DIR}/leducsolver"
+)
+add_custom_command(TARGET leducsolver POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/src/pysrc"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:leducsolver>"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/pysrc/$<TARGET_FILE_NAME:leducsolver>"
+    COMMENT "Copying leducsolver module to ${CMAKE_CURRENT_SOURCE_DIR}/src/pysrc"
+    VERBATIM
 )
 target_compile_options(leducsolver PRIVATE -O3)
 target_include_directories(leducsolver PRIVATE src/cppsrc)
